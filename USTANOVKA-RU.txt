@@ -1,0 +1,581 @@
+﻿BALANCE OF POWER - УСТАНОВКА И ЗАПУСК
+=====================================
+
+Единая инструкция для студентов: Windows, Linux, macOS. Правила игры - в
+файле PRAVILA-RU.pdf (или PRAVILA-RU.md - открывается Блокнотом).
+Игре нужны Python 3.8-3.14 (64 бита) и библиотека PyQt5. Права
+администратора для установки и игры НЕ нужны.
+
+
+0. ЧТО В АРХИВЕ
+===============
+  main.py и остальные *.py   сама игра (запускать main.py)
+  data\, img\, music\        данные, картинки, музыка (не удаляйте;
+                             в облегчённом архиве -lite папки music\
+                             нет, играет встроенная музыка)
+  start-windows.bat          запуск в Windows (первый раз ставит PyQt5)
+  setup-venv-windows.bat     запуск в Windows через виртуальное окружение
+  start-linux.sh             запуск в Linux (его вызывает и start-mac.command)
+  start-mac.command          запуск в macOS
+  requirements.txt           одна строка: PyQt5>=5.15
+  netcheck.py                проверка сети (раздел 7)
+  relay.py                   реле: запускает ТОЛЬКО преподаватель (п. 6.4)
+  USTANOVKA-RU.txt           эта инструкция
+  PRAVILA-RU.md, .pdf       правила игры (PDF удобнее для печати)
+
+Папка wheels (если преподаватель положил её рядом с main.py) - файлы PyQt5
+для установки без интернета. Если её нет, PyQt5 скачивается из интернета.
+
+Распаковывайте архив целиком (Windows: правый щелчок - Извлечь все), а не
+запускайте файлы из окна просмотра zip. Если архив скачан из интернета, до
+распаковки откройте его Свойства и отметьте "Разблокировать": иначе
+SmartScreen может мешать. Папку с игрой можно держать где угодно, хоть на
+флешке. В Windows надёжнее короткий путь без кириллицы и пробелов, например
+C:\BoP (см. раздел 8, ошибка плагина Qt). В Linux и macOS кириллица и
+пробелы в пути не мешают.
+
+Сохранения лежат НЕ в папке игры, а в каталоге пользователя (раздел 5).
+
+
+1. БЫСТРЫЙ СТАРТ ЗА 3 ШАГА
+==========================
+
+WINDOWS
+-------
+  1) Поставьте 64-битный Python: https://www.python.org/downloads/windows/
+     На первом экране установщика отметьте "Add python.exe to PATH".
+     Остальное по умолчанию (подробно - раздел 2).
+  2) Распакуйте архив.
+  3) Дважды щёлкните start-windows.bat. При первом запуске он сам поставит
+     PyQt5 (нужен интернет либо папка wheels рядом - раздел 3) и запустит
+     игру. Следующие запуски быстрые. Чёрное окно не закрывайте, пока
+     играете: оно закроется само после выхода из игры; при ошибке оно
+     остаётся с сообщением на английском.
+
+  Файл на сетевой папке \\ИМЯ-ПК\...: запускайте по имени компьютера, не по
+  IP. start-windows.bat сам скопирует игру в
+  %LOCALAPPDATA%\balance-of-power\app (без папки wheels) и
+  запустит оттуда; повторные запуски копируют только изменившееся. Если
+  сетевая папка подключена как диск (Z:), копирование по умолчанию НЕ
+  включается: в окне cmd выполните  set BOP_LOCAL_COPY=1  и запустите
+  bat из этого же окна. Отключить копирование: set BOP_NO_LOCAL_COPY=1.
+
+LINUX
+-----
+  1) Python 3 обычно уже есть. Если нет:  sudo apt install python3
+     (или dnf, pacman).
+  2) Распакуйте архив, откройте терминал в папке игры. Если после zip
+     файл не запускается ("Отказано в доступе"):
+         chmod +x start-linux.sh
+     либо запускайте так:  bash start-linux.sh
+  3) Запустите:
+         ./start-linux.sh
+     Если PyQt5 нет, скрипт покажет варианты установки и спросит
+     "Поставить PyQt5 сейчас через pip? [y/N]". Ответьте y: он выполнит
+     pip install --user PyQt5, а если pip отказывает (PEP 668) - сам
+     создаст окружение в ~/.local/share/balance-of-power/venv. Без вашего
+     согласия он ничего не ставит. Запускайте из терминала: без терминала
+     вопрос задать некому, и скрипт просто завершится.
+
+macOS
+-----
+  1) Python 3: если python3 --version не работает или предлагает поставить
+     средства разработчика, возьмите установщик с
+     https://www.python.org/downloads/
+  2) Распакуйте архив.
+  3) Дважды щёлкните start-mac.command. Он передаёт управление
+     start-linux.sh и задаёт тот же вопрос про PyQt5 в окне Терминала.
+     Если macOS блокирует файл: правый щелчок - Открыть, либо в Терминале
+     в папке игры:
+         xattr -dr com.apple.quarantine .
+         chmod +x start-mac.command start-linux.sh
+
+
+2. ПОДРОБНО: УСТАНОВКА PYTHON
+=============================
+Поддерживается Python 3.8-3.14, 64 бита. Windows 7/8: только Python 3.8.
+Версия 3.12 - самая проверенная; если можно выбирать, берите её.
+
+Windows
+  1) Скачайте 64-битный установщик (Windows installer 64-bit) на
+     https://www.python.org/downloads/windows/ или возьмите у
+     преподавателя.
+  2) На первом экране отметьте "Add python.exe to PATH". Лаунчер "py"
+     оставьте включённым. Если вариант установки "для всех пользователей"
+     требует прав администратора, снимите галочку "for all users / use
+     admin privileges": тогда Python ставится только вам. Если установка
+     запрещена политикой (AppLocker), обратитесь к ИТ.
+  3) Нажмите "Install Now". Если выбираете "Customize installation",
+     оставьте отмеченным pip: без него не работает venv.
+  4) Закройте установщик и откройте НОВОЕ окно командной строки
+     (Win+R, cmd, Enter): окна, открытые до установки, не видят новый PATH.
+     Проверьте:
+         py --version
+         py -0p
+     Первая команда печатает версию (не ниже 3.8), вторая - все найденные
+     Python с путями.
+  5) Заглушка "python" из Microsoft Store. В Windows 10/11 команда python
+     может не запускать Python, а открывать магазин. Это не настоящий
+     Python. Отключите её: Параметры - Приложения - Управление
+     псевдонимами выполнения приложений (на некоторых сборках: Приложения -
+     Дополнительные параметры приложений), выключите python.exe и
+     python3.exe. Либо всегда пишите py. Файлы start-windows.bat и
+     setup-venv-windows.bat такую заглушку пропускают сами.
+  Проверка разрядности (должно напечатать True):
+         py -c "import sys; print(sys.maxsize > 2**32)"
+
+Linux
+         python3 --version                          (не ниже 3.8)
+         sudo apt install python3 python3-pip python3-venv   (Debian, Ubuntu)
+  Без sudo Python и PyQt5 можно поставить в виртуальное окружение
+  (п. 3.4), если Python в системе уже есть.
+
+macOS
+         python3 --version
+  Если Python нет: установщик с python.org (macOS может спросить пароль).
+
+
+3. УСТАНОВКА PYQT5
+==================
+PyQt5 нужен один раз. Сама игра в интернет не ходит (кроме необязательного
+5-го уровня сложности, см. раздел 8).
+
+3.1. Через pip (есть интернет)
+  Windows, командная строка, в папке игры (где лежит requirements.txt):
+         cd /d "D:\Games\BalanceOfPower"
+         py -m pip install -r requirements.txt
+  Либо просто запустите start-windows.bat - он поставит PyQt5 сам, в
+  %LOCALAPPDATA%\balance-of-power\libs\ (ключ pip --target; не в
+  перемещаемый профиль), отдельную подпапку для каждой версии Python.
+  Linux, macOS:
+         python3 -m pip install --user -r requirements.txt
+  Linux, пакетом дистрибутива (нужен sudo):
+         sudo apt install python3-pyqt5          (Debian, Ubuntu, Mint)
+         sudo dnf install python3-qt5            (Fedora, RHEL)
+         sudo pacman -S python-pyqt5             (Arch)
+  Новые Debian 12+, Ubuntu 23.04+, Fedora запрещают pip в системный
+  Python (PEP 668, сообщение externally-managed-environment): берите
+  пакет дистрибутива или venv (п. 3.4). ARM-Linux: колёс PyQt5 для pip
+  нет, только пакет дистрибутива. Windows на ARM не поддерживается.
+  Проверка (подставьте тот python, которым запускаете игру):
+         python3 -c "import PyQt5.QtWidgets; print('PyQt5 OK')"
+
+3.2. Через корпоративный прокси
+  Адрес прокси спросите у ИТ (вид: http://proxy.example.com:8080).
+  Один раз, для одной команды pip:
+         py -m pip install --proxy http://user@proxy.example.com:8080 ^
+             -r requirements.txt
+  (^ - перенос строки в cmd; pip спросит пароль.) Или для всего окна. Для
+  start-windows.bat и setup-venv-windows.bat это нужно сделать ДО запуска,
+  из того же окна, а не двойным щелчком:
+         Windows cmd:   set "HTTPS_PROXY=http://user:password@proxy:8080"
+         PowerShell:    $env:HTTPS_PROXY = "http://user:password@proxy:8080"
+         Linux, macOS:  export HTTPS_PROXY=http://user:password@proxy:8080
+  Спецсимволы в пароле пишутся в процентной записи (@ это %40). Прокси,
+  принимающие только NTLM/Kerberos, pip не умеет: попросите ИТ разрешить
+  адрес или возьмите вариант без интернета (п. 3.3).
+  Ошибка 407 Proxy Authentication Required - логин или пароль не заданы
+  или неверны.
+  Ошибка CERTIFICATE_VERIFY_FAILED - организация подменяет сертификаты
+  HTTPS. Попросите у ИТ корневой сертификат (файл .pem) и укажите его:
+         py -m pip install --cert C:\certs\corp-ca.pem -r requirements.txt
+  Ключи --trusted-host pypi.org --trusted-host files.pythonhosted.org
+  отключают проверку сертификата для этих двух адресов; используйте их
+  только в крайнем случае и не делайте постоянными.
+
+3.3. Без интернета: папка wheels
+  Преподаватель или ИТ готовит папку с именем ровно wheels (файлы *.whl:
+  PyQt5, PyQt5-Qt5, PyQt5-sip) и кладёт её РЯДОМ с start-windows.bat, в ту
+  же папку, где main.py. Папка должна быть собрана под вашу версию Python
+  (64 бита); обычно в ней несколько версий сразу.
+    - Windows: просто запустите start-windows.bat или
+      setup-venv-windows.bat. Найдя wheels, они ставят оттуда без
+      интернета (pip --no-index). setup-venv-windows.bat, если в wheels не
+      нашлось всего нужного для вашего Python, пробует интернет.
+    - Вручную:
+         py -m pip install --no-index --find-links wheels -r requirements.txt
+    - Linux: start-linux.sh тоже пробует папку wheels (pip install --user
+      --no-index --find-links wheels PyQt5), но такая папка обычно собрана
+      для Windows и в Linux не подойдёт: ставьте пакет дистрибутива.
+  Ошибка "No matching distribution found" при установке из wheels: в
+  папке нет файлов для вашей версии или разрядности Python. Сообщите
+  преподавателю вывод  py -c "import sys; print(sys.version)".
+  Для преподавателя: папку собирают на ПК с интернетом, по одной команде
+  на каждую версию Python:
+         py -m pip download -r requirements.txt -d wheels ^
+             --only-binary=:all: --platform win_amd64 --python-version 3.12
+
+3.4. Виртуальное окружение (venv)
+  venv - отдельная папка со своим Python и своим PyQt5. В систему ничего
+  не ставится, права администратора не нужны, удаление - удаление папки.
+  Не создавайте venv на сетевой папке и в перемещаемом профиле: venv хранит
+  абсолютные пути и после копирования не работает.
+
+  Windows, самый простой способ: дважды щёлкните setup-venv-windows.bat.
+  Он по порядку: (1) если запущен с сетевой папки \\ПК\..., копирует игру в
+  %LOCALAPPDATA%\BalanceOfPower и работает оттуда; (2) создаёт venv в
+  %LOCALAPPDATA%\bop-venv, если его нет; (3) ставит в него PyQt5 из wheels
+  (если папка рядом) или из интернета, если PyQt5 там ещё нет; (4) запускает
+  игру. Повторный запуск пропускает всё готовое. Другое место для venv:
+         setup-venv-windows.bat C:\bop-venv
+  (или переменная BOP_VENV; аргумент главнее). Путь делайте коротким,
+  только ASCII, на локальном диске. Если venv не создаётся, нужен pip:
+  запустите установщик Python ещё раз, Modify, Optional Features, pip.
+
+  Вручную, Windows cmd (в папке игры):
+         py -3 -m venv "%LOCALAPPDATA%\bop-venv"
+         "%LOCALAPPDATA%\bop-venv\Scripts\python.exe" -m pip install ^
+             -r requirements.txt
+         "%LOCALAPPDATA%\bop-venv\Scripts\python.exe" main.py
+  Вручную, Windows PowerShell (в папке игры):
+         py -3 -m venv "$env:LOCALAPPDATA\bop-venv"
+         $VPY = "$env:LOCALAPPDATA\bop-venv\Scripts\python.exe"
+         & $VPY -m pip install -r requirements.txt
+         & $VPY main.py
+  Рекомендуется НЕ активировать окружение, а вызывать python.exe по
+  полному пути, как выше: так работает и в cmd, и в PowerShell. Если
+  хотите активировать:
+         cmd:         "%LOCALAPPDATA%\bop-venv\Scripts\activate.bat"
+         PowerShell:  & "$env:LOCALAPPDATA\bop-venv\Scripts\Activate.ps1"
+  PowerShell может ответить "running scripts is disabled on this system".
+  Тогда не активируйте (используйте полный путь) либо разрешите скрипты
+  только в этом окне, ничего не сохраняя:
+         Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+  Linux и macOS. Чтобы start-linux.sh / start-mac.command сами находили
+  окружение, создайте его именно здесь:
+         python3 -m venv ~/.local/share/balance-of-power/venv
+         ~/.local/share/balance-of-power/venv/bin/python -m pip \
+             install -r requirements.txt
+         ./start-linux.sh
+  (скрипт берёт это окружение, только если системный Python не видит
+  PyQt5; если PyQt5 в системе уже есть, запустится системный Python).
+  Окружение в другом месте скрипты НЕ найдут; тогда запускайте игру прямо
+  его Python:
+         python3 -m venv ~/bop-venv
+         ~/bop-venv/bin/python -m pip install -r requirements.txt
+         ~/bop-venv/bin/python main.py
+  Если python3 -m venv пишет "ensurepip is not available", поставьте пакет
+  python3-venv (Debian, Ubuntu).
+
+
+4. ЗАПУСК
+=========
+Обычный способ: двойной щелчок по файлу запуска вашей системы
+(start-windows.bat, start-linux.sh, start-mac.command) или
+setup-venv-windows.bat. Они сами проверяют Python и PyQt5 и говорят, чего
+не хватает. Откроется стартовый экран: Continue, New game, Multiplayer...,
+Play by mail..., Ask the advisors... (подсказки советников), AI settings...
+(настройки ИИ-советников), Manual (правила прямо в игре), Quit.
+
+Вручную, из папки игры:
+         py main.py                  Windows
+         python3 main.py             Linux, macOS
+         "%LOCALAPPDATA%\bop-venv\Scripts\python.exe" main.py   (venv)
+
+Ключи командной строки (после main.py):
+  --game          сразу в игру, без стартового экрана
+  --host 45454    сразу начать сетевую игру хостом на этом порту
+  --join АДРЕС    сразу подключиться к хосту
+  --netcheck      проверка сети (раздел 7)
+  --help          краткая справка
+
+Удалённый рабочий стол (RDP) или слабый ПК: задайте BOP_REDUCE_MOTION=1
+(отключает анимацию). Карта тормозит: Settings - Relief shading
+выключить, Reduce motion включить. Экран 1366x768 с масштабом 125-150%:
+игре нужно около 960x520 логических пикселей; при необходимости уменьшите
+масштаб Windows (Параметры - Дисплей).
+
+
+5. ГДЕ СОХРАНЕНИЯ, ПЕРЕНОС ПАРТИИ
+=================================
+Сохранения и настройки не лежат в папке игры. Каталог пользователя:
+
+  Windows:        %LOCALAPPDATA%\balance-of-power
+                  (обычно C:\Users\ИМЯ\AppData\Local\balance-of-power)
+  Linux, macOS:   ~/.local/share/balance-of-power
+                  (или $XDG_DATA_HOME/balance-of-power, если задана)
+
+Что там: save.dat (текущая партия), saves\ (именованные сохранения),
+options.dat и graphics.json (настройки), mail\ (метки игры через общую
+папку), errors.log (записи о сбоях, открывайте Блокнотом), music_cache\
+(встроенные мелодии; создаются сами, можно удалить) и, если вы положили
+свои мелодии, music\.
+
+Свой каталог задаёт переменная BOP_USER_DIR (например, если профиль
+недоступен для записи или данные должны жить на флешке):
+         Windows cmd:   set "BOP_USER_DIR=D:\bop-data"
+         PowerShell:    $env:BOP_USER_DIR = "D:\bop-data"
+         навсегда (Windows):  setx BOP_USER_DIR D:\bop-data
+         Linux, macOS:  export BOP_USER_DIR=$HOME/bop-data
+Если нужный каталог недоступен для записи, игра использует папку в
+системном временном каталоге (Windows: %TEMP%\balance-of-power-ИМЯ) и
+предупреждает "Cannot write to ... saves may not persist". Сохранения там
+могут пропасть: задайте BOP_USER_DIR на папку, куда можно писать.
+
+Перенос партии на другой компьютер: закройте игру и скопируйте каталог
+balance-of-power целиком (на флешку, потом в такое же место на другом ПК).
+Папку с игрой переносить не обязательно: на другом ПК её можно взять из
+архива заново.
+
+
+6. ИГРА ВДВОЁМ
+==============
+Три способа. Берите сверху вниз, пока не заработает один из них.
+
+6.1. Hot-seat: двое за одним компьютером
+  New game - в колонке Game mode выберите "Two players". Сеть не нужна.
+  Ходят по очереди: Pass to ... передаёт ход второму, End the year
+  завершает год. В кризисах игра называет, чей сейчас ответ.
+
+6.2. По локальной сети (LAN): хост и гость
+  Хост: Multiplayer... - Host a game. Задайте Player name и Port (по
+  умолчанию 45454), нажмите Host. Когда соперник подключится, выберите
+  сторону (Your side), оба нажимают Ready, хост - Start game.
+  Гость: Multiplayer... - Join a game. Игра хоста появляется в списке
+  "Games found on your local network" (кнопка Refresh): выберите её и
+  нажмите Join. Если список пуст, впишите адрес хоста в поле Address (IP
+  или имя компьютера) и нажмите Join. Свой IP хост узнаёт так:
+         Windows: ipconfig
+         Linux:   hostname -I
+         macOS:   ipconfig getifaddr en0
+  Порты:
+    TCP 45454   сама игра (номер можно сменить в поле Port). Нужен
+                ВХОДЯЩИЙ на ПК хоста.
+    UDP 45455   поиск игр в локальной сети (широковещательный пакет). Тоже
+                входящий на хосте. Не работает - не страшно: адрес вводят
+                вручную.
+    Гостю входящие порты не нужны: он только подключается к хосту.
+  Брандмауэр БЕЗ прав администратора. Когда вы нажимаете Host, Windows
+  может спросить "Разрешить Python связь в этих сетях?". Студент без прав
+  администратора исключение добавить не может: кнопка просит пароль
+  администратора. Не обходите это и не ставьте галочку "общедоступные
+  сети". Если вы нажали "Отмена", игра работает, но к вам не подключатся.
+  Что делать:
+    - стать ГОСТЕМ, а хостом сделать соперника или преподавателя: гостю
+      ничего открывать не нужно;
+    - играть через реле преподавателя (п. 6.4);
+    - играть через общую папку (п. 6.3);
+    - попросить ИТ открыть на ПК хоста TCP 45454 и UDP 45455.
+  Если запрос просит выбрать сети, а права есть, отмечайте только
+  "Частные сети" (Private networks). Если сеть Windows определена как
+  "Общедоступная", оба порта закрыты. Администратор может открыть порты
+  вручную (cmd "от имени администратора", на ПК хоста):
+         netsh advfirewall firewall add rule name="Balance of Power" ^
+             dir=in action=allow protocol=TCP localport=45454
+         netsh advfirewall firewall add rule ^
+             name="Balance of Power discovery" dir=in action=allow ^
+             protocol=UDP localport=45455
+  Соперник не находится, хотя адрес верен: Wi-Fi с изоляцией клиентов,
+  гостевая сеть или разные сегменты (VLAN) блокируют связь между ПК.
+  Запустите проверку (раздел 7).
+
+6.3. Через общую папку (play by mail)
+  Для сетей, где ПК не соединяются друг с другом, но общая папка видна
+  обоим. Порты и широковещание не нужны. Ход - один файл (*.bopg) в
+  папке, второй игрок забирает его оттуда. Ходы поочерёдные, как в партии
+  по почте.
+  Нужна сетевая папка, куда ОБА могут писать (право "Изменение":
+  записывать, переименовывать, удалять), и своя подпапка для каждой пары,
+  например \\ПРЕПОД-ПК\bop-mail\pair07 (подставьте свой путь; в Linux
+  например /mnt/share/bop). Сначала проверьте её (раздел 7):
+         py netcheck.py --share \\ПРЕПОД-ПК\bop-mail\pair07
+  В игре: кнопка Play by mail... на стартовом экране (или Multiplayer...,
+  блок "Play by mail (shared folder)").
+    1) Оба впишите путь к папке в поле или нажмите Browse.
+    2) Один игрок нажимает Create game (поле Game code оставьте пустым):
+       игра запишет начальную позицию и покажет код партии. Первый ход
+       остаётся за ним.
+    3) Он сообщает код второму. Второй вписывает код в Game code и
+       нажимает Open mailbox.
+    4) Сделав свой ход, нажмите Send my turn. Игрок, который ждёт,
+       нажимает Load their move.
+  Советы: в коде партии используйте только латинские буквы, цифры, "-" и
+  "_" (без пробелов и других знаков). Каждый раз, когда вы заново открыли
+  окно игры по почте (после перезапуска игры или возврата в лобби), снова
+  нажмите Open mailbox, иначе ходы не будут приходить.
+  Каждой паре нужны своя подпапка и свой код партии, иначе чужие ходы
+  перепутаются. Если игра пишет о конфликте, дубликате или старом файле,
+  такой ход НЕ применяется: договоритесь, чей сейчас ход.
+
+6.4. Через реле преподавателя
+  Если студенты не могут открыть порты, а ПК преподавателя доступен всем,
+  преподаватель запускает на своём ПК:
+         py relay.py          (Windows)
+         python3 relay.py     (Linux, macOS)
+  Реле открывает комнаты на TCP 46000-46019; каждой паре студентов нужен
+  свой порт (своя комната). Ключи реле (только для преподавателя):
+  --bind АДРЕС, --first ПОРТ (по умолчанию 46000), --count N (число
+  комнат, по умолчанию 20), --idle СЕКУНДЫ (по умолчанию 60). Нужен только
+  Python 3.8+, ничего ставить не надо. Правило брандмауэра на
+  TCP 46000-46019 нужно один раз на ПК преподавателя (при первом запуске
+  Windows спросит; выбирать "Частные сети"). У студентов брандмауэр менять
+  не надо: оба только подключаются к преподавателю.
+  Хост: Multiplayer... - Host a game, отметьте "Host through the teacher's
+  relay (optional)" и впишите адрес преподавателя и порт комнаты (номер
+  назовёт преподаватель, например 46003). Гость: Join a game - в поле
+  Address впишите тот же адрес (без порта), а тот же номер порта задайте
+  в соседнем числовом поле порта справа от Address; затем Join. Проверка достижимости реле:
+         py netcheck.py --relay АДРЕС-ПРЕПОДАВАТЕЛЯ
+
+
+7. ПРОВЕРКА СЕТИ (netcheck)
+===========================
+Печатает построчно PASS, WARN, FAIL или INFO; после каждого WARN и FAIL -
+что исправить. Окно игры не открывается, нужна только стандартная
+библиотека Python. Код выхода 1, если что-то не прошло.
+         py main.py --netcheck              (или:  py netcheck.py)
+         python3 main.py --netcheck         Linux, macOS
+Без ключей проверяет: версию и разрядность Python, наличие PyQt5, папку
+сохранений, свой IP-адрес (169.254.x.x значит, что адрес не выдан),
+можно ли занять TCP-порт игры и принимать UDP 45455, рассылку UDP.
+Ключи:
+  --peer IP[:ПОРТ]   подключиться к игре хоста (порт по умолчанию 45454)
+  --relay IP         проверить реле преподавателя (TCP 46000-46019)
+  --share ПУТЬ       проверить общую папку (можно ли в ней работать)
+  --llm [URL]        HTTPS-проверка модели 5-го уровня (ключ не передаётся)
+  --pypi             HTTPS-проверка pypi.org (нужна только для pip)
+  --port N           другой порт игры (по умолчанию 45454)
+Примеры:
+         py netcheck.py --pypi
+         py netcheck.py --peer 192.168.1.20
+         py netcheck.py --share \\ПРЕПОД-ПК\bop-mail
+В игре похожую проверку делает кнопка Test connection (Multiplayer...).
+Запустите netcheck первым делом, если игра не находит соперника или pip не
+скачивает PyQt5 (--pypi).
+
+
+8. ЕСЛИ ЧТО-ТО НЕ РАБОТАЕТ
+==========================
+Формат: симптом -> причина и что делать.
+
+* 'py' is not recognized as an internal or external command
+  -> Нет лаунчера py либо окно cmd открыто до установки Python. Откройте
+  НОВОЕ окно. Не помогло - запустите установщик Python, Modify, отметьте
+  py launcher; либо пишите python.
+
+* start-windows.bat: "Python 3.8 or newer ... was not found"
+  -> Python не поставлен, не в PATH, 32-битный, либо это заглушка из
+  Microsoft Store. См. раздел 2, п. 5.
+
+* При вводе python открывается Microsoft Store
+  -> Заглушка. Отключите псевдонимы (раздел 2, п. 5) или пишите py.
+
+* ModuleNotFoundError: No module named 'PyQt5'
+  -> PyQt5 не установлен либо установлен для другого Python. Повторите
+  раздел 3 тем же интерпретатором, которым запускаете игру. С venv
+  запускайте игру его python.exe по полному пути.
+
+* ModuleNotFoundError: No module named 'PyQt5.QtWidgets'
+  -> Попался несовместимый пакет. Удалите и поставьте заново:
+         py -m pip uninstall PyQt5 PyQt5-Qt5 PyQt5-sip
+         py -m pip install -r requirements.txt
+
+* pip: Retrying ... ProxyError, 407, Connection timed out, "Could not find
+  a version that satisfies the requirement PyQt5"
+  -> Не задан прокси, неверный пароль, PyPI закрыт либо Python 32-битный.
+  См. п. 3.2 и 3.3; проверка:  py netcheck.py --pypi
+
+* CERTIFICATE_VERIFY_FAILED
+  -> Организация подменяет сертификаты HTTPS. См. п. 3.2 (--cert).
+
+* No matching distribution found for PyQt5 (с папкой wheels)
+  -> В wheels нет файлов для вашей версии или разрядности (п. 3.3).
+
+* ImportError: DLL load failed while importing QtCore (или QtWidgets)
+  -> (а) 32-битный Python; (б) нет Microsoft Visual C++ 2015-2022 x64
+  Redistributable (vc_redist.x64.exe, нужны права администратора - к ИТ);
+  (в) антивирус удалил DLL Qt. Поставьте 64-битный Python; в случаях (б)
+  и (в) обратитесь к ИТ.
+
+* qt.qpa.plugin: Could not load the Qt platform plugin "windows" in ""
+  even though it was found (Windows)
+  -> Слишком длинный путь (предел 260 символов), не-ASCII символы в пути
+  (например, кириллица в имени пользователя) либо перенесённый venv.
+  Держите игру и venv в коротких ASCII-путях: C:\BoP и C:\bop-venv
+  (если в C:\ можно создавать папки). venv создайте заново, не
+  переносите.
+
+* qt.qpa.plugin: Could not load the Qt platform plugin "xcb" (Linux)
+  -> Не хватает системных библиотек Qt. Поставьте PyQt5 пакетом
+  дистрибутива (python3-pyqt5 / python3-qt5), а не через pip.
+
+* pip: externally-managed-environment (Linux)
+  -> PEP 668. Пакет дистрибутива либо venv (п. 3.4); start-linux.sh сам
+  попробует venv в ~/.local/share/balance-of-power/venv.
+
+* No module named venv / ensurepip is not available
+  -> Нет pip или venv. Windows: установщик Python, Modify, Optional
+  Features, pip. Debian, Ubuntu: sudo apt install python3-venv.
+
+* PowerShell: running scripts is disabled on this system (Activate.ps1)
+  -> Не активируйте окружение, вызывайте python.exe по полному пути, либо
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass (п. 3.4).
+
+* Антивирус или SmartScreen блокирует файл, удаляет python.exe, DLL Qt
+  -> Распаковывайте архив после "Разблокировать" в Свойствах. Остальное -
+  к ИТ: исключить из проверки папку игры и %LOCALAPPDATA%\balance-of-power.
+
+* macOS: файл не открывается ("неопознанный разработчик")
+  -> Правый щелчок - Открыть, либо xattr -dr com.apple.quarantine .
+
+* Linux, macOS: Permission denied при ./start-linux.sh
+  -> chmod +x start-linux.sh start-mac.command  или  bash start-linux.sh
+
+* Access is denied / PermissionError при создании venv в
+  %LOCALAPPDATA%\bop-venv
+  -> Папка заблокирована. Другое место:
+         setup-venv-windows.bat D:\bop-venv
+
+* "Cannot write to ... saves may not persist"
+  -> Каталог данных недоступен для записи. Задайте BOP_USER_DIR
+  (раздел 5).
+
+* Окно не появляется, ошибок нет
+  -> Запустите из терминала и прочитайте вывод. По сети или через RDP
+  попробуйте BOP_REDUCE_MOTION=1. Смотрите errors.log (раздел 5).
+
+* Нет звука
+  -> Не мешает игре. Проверьте Settings - Sound и Music.
+
+* Игра не находит соперника
+  -> Брандмауэр хоста (п. 6.2), изоляция клиентов в Wi-Fi, поиск
+  заблокирован. Вводите адрес вручную, проверьте  py netcheck.py --peer
+  АДРЕС; иначе реле (п. 6.4) или общая папка (п. 6.3).
+
+* Уровень 5 пишет "the network inspects HTTPS ..." или "the proxy wants a
+  login"
+  -> Относится только к необязательному 5-му уровню (он обращается к
+  языковой модели через интернет; без ключа играет как 4-й, ничего
+  настраивать не нужно). Корневой сертификат организации укажите в
+  переменной SSL_CERT_FILE (путь к .pem); прокси с логином:
+  HTTPS_PROXY=http://логин:пароль@прокси:порт. Проверка:
+  py main.py --netcheck --llm
+
+* Другое
+  -> Запустите py main.py в окне cmd, скопируйте весь текст ошибки и вывод
+  py netcheck.py и отправьте преподавателю.
+
+
+9. УДАЛЕНИЕ ИГРЫ
+================
+Игра нигде в системе не регистрируется: удаление - это удаление папок.
+  1) Папка с игрой (распакованный архив).
+  2) Windows:
+       %LOCALAPPDATA%\bop-venv           venv (setup-venv-windows.bat)
+       %LOCALAPPDATA%\BalanceOfPower     копия игры (setup-venv-windows.bat
+                                         с сетевой папки)
+       %LOCALAPPDATA%\balance-of-power   ВНИМАНИЕ: здесь PyQt5 (libs), копия
+                                         игры (app) и СОХРАНЕНИЯ
+     Пример в cmd:  rmdir /s /q "%LOCALAPPDATA%\bop-venv"
+     Нужны сохранения - сначала скопируйте save.dat и saves\.
+     Если задавали BOP_USER_DIR, удалите и ту папку.
+  3) Linux, macOS:  rm -rf ~/.local/share/balance-of-power
+     (там сохранения и, если создавалось, venv). PyQt5, поставленный
+     командой pip install --user, удаляется так:
+         python3 -m pip uninstall PyQt5 PyQt5-Qt5 PyQt5-sip
+  Python удаляется как обычная программа (Windows: Параметры - Приложения).
+
+Обновление игры: замените файлы в папке игры новой версией; сохранения не
+затрагиваются. Если обновили Python (например, 3.12 на 3.13), venv
+удалите и создайте заново.

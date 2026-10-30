@@ -1,0 +1,89 @@
+{
+ "version": 1,
+ "note": "Intermediate objectives. Each entry names a check implemented in GameLogic/Objectives.py; each reward is a standing commitment: it is folded into the superpower's score only while the objective holds, and is lost again if it stops holding (see the notes in GameLogic/Objectives.py).",
+ "rewards_are_points": true,
+ "objectives": [
+  {
+   "id": "bloc_intact",
+   "check": "alliance_loyal",
+   "side": null,
+   "reward": 150,
+   "title": "Hold your alliance together",
+   "detail": "Every listed ally of your bloc must hold a higher treaty with you than with the other superpower. One defection fails it.",
+   "params": {
+    "members_usa": [
+     13,
+     14,
+     16,
+     17,
+     18,
+     19,
+     21,
+     48
+    ],
+    "members_ussr": [
+     20,
+     22,
+     23,
+     24
+    ]
+   },
+   "short": "Alliance"
+  },
+  {
+   "id": "gulf_held",
+   "check": "gulf_held",
+   "side": null,
+   "reward": 120,
+   "title": "Keep the Gulf on your side",
+   "detail": "At least two of Iraq, Saudi Arabia and Iran must think better of you than of your rival.",
+   "params": {
+    "members": [
+     52,
+     53,
+     54
+    ],
+    "minimum": 2
+   },
+   "short": "The Gulf"
+  },
+  {
+   "id": "sphere_growth",
+   "check": "sphere_growth",
+   "side": null,
+   "reward": 150,
+   "title": "Gain ground in the unaligned world",
+   "detail": "Your sphere of influence must end up larger than it was in 1982.",
+   "params": {
+    "gain": 1
+   },
+   "short": "Grow sphere"
+  },
+  {
+   "id": "calm_world",
+   "check": "calm_world",
+   "side": null,
+   "reward": 100,
+   "title": "Keep the world calm to 1985",
+   "detail": "World tension must never rise above 100 before the end of 1985. One breach loses it for good.",
+   "params": {
+    "limit": 100,
+    "until": 1985
+   },
+   "short": "Stay calm"
+  },
+  {
+   "id": "clients_kept",
+   "check": "clients_kept",
+   "side": null,
+   "reward": 100,
+   "title": "Do not lose your clients",
+   "detail": "No more than three countries that were your formal allies in 1982 may leave you.",
+   "params": {
+    "max_lost": 3,
+    "treaty_level": 3
+   },
+   "short": "Keep clients"
+  }
+ ]
+}
