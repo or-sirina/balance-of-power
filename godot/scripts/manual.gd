@@ -138,7 +138,7 @@ AI settings separately control advisor/opponent models, budgets, timeouts and of
 
 [b]Select a country[/b] with a left click on the map. Its drawer shows relations, prestige and available policies. Select a policy, choose a legal step and press Apply. Country details opens its report and history. Close the drawer to recover the full map.
 
-[b]Explore the map[/b] with the wheel to zoom and the middle mouse button to pan. Arrow keys change country selection. Fit map restores the overall view. Choose a map group and indicator to compare relations, policies or country statistics. Perspective-sensitive modes use the selected country.
+[b]Explore the map[/b] with the wheel or +/− to zoom and the middle mouse button to pan. Double-click a country to focus it; F or Fit map restores the whole view. Arrow keys change country selection. Layers controls city miniatures, terrain relief, conflicts and aid/trade connections. Click a city to open the country, an event marker to read its briefing, or a connection to inspect the policy. The world view highlights major developments; zoom in for minor unrest. City models and streets are illustrative country markers, not simulated city locations. Connections show policy commitments, not transport routes. Choose a map group and indicator to compare relations, policies or country statistics. Perspective-sensitive modes use the selected country.
 
 [b]Dispatches[/b] opens the news drawer. Review events and challenge eligible opposing moves. Close or toggle the drawer to return to the map. A diplomatic crisis displays its available decisions in the country drawer.
 
@@ -290,7 +290,7 @@ const RU = [
 
 [b]Выберите страну[/b] левой кнопкой на карте. В её панели показаны отношения, престиж и доступная политика. Выберите меру, допустимый уровень и нажмите Применить. Сведения о стране открывают отчёт и историю. Закройте панель, чтобы снова видеть всю карту.
 
-[b]Исследуйте карту:[/b] колесо меняет масштаб, средняя кнопка перемещает карту. Стрелки меняют выбранную страну. Вся карта возвращает общий вид. Выберите группу и показатель для сравнения отношений, политики или статистики стран. Зависимые от точки зрения показатели используют выбранную страну.
+[b]Исследуйте карту:[/b] колесо или +/− меняют масштаб, средняя кнопка перемещает карту. Двойной щелчок приближает страну; F или Вся карта возвращают общий вид. Стрелки меняют выбранную страну. Слои включают городские модели, рельеф, конфликты и связи помощи и торговли. Щёлкните город, чтобы открыть страну, значок события — для обзора обстановки, линию связи — для сведений о политике. Общая карта выделяет главные события; небольшие волнения видны при увеличении. Города и улицы — условные модели стран, а связи отражают политику, не маршруты снабжения. Выберите группу и показатель для сравнения отношений, политики или статистики стран. Зависимые от точки зрения показатели используют выбранную страну.
 
 [b]Донесения[/b] открывают список новостей. Изучайте события и оспаривайте подходящие действия соперника. Закройте или переключите панель, чтобы вернуться к карте. Доступные решения дипломатического кризиса появляются в панели страны.
 

@@ -66,6 +66,8 @@ def extract_macos_app(archive, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--godot')
+    parser.add_argument('--output-root', type=Path, default=ROOT / 'dist-godot',
+                        help='bundle directory; use a separate location when an older bundle is running')
     parser.add_argument('--platform', choices=('linux', 'windows', 'macos'), default={'Linux':'linux','Windows':'windows','Darwin':'macos'}.get(platform.system()))
     args = parser.parse_args()
     current = {'Linux':'linux','Windows':'windows','Darwin':'macos'}.get(platform.system())
@@ -73,8 +75,17 @@ def main():
         parser.error('Build the frozen launcher on the target operating system; cross-freezing is unsupported.')
     godot = find_godot(args.godot)
     project = ROOT / 'godot'
-    output = ROOT / 'dist-godot' / args.platform
-    work = ROOT / 'dist-godot' / 'build' / args.platform
+    output = args.output_root.resolve() / args.platform
+    work = args.output_root.resolve() / 'build' / args.platform
+    previous_launcher = output / ('BalanceOfPower.exe' if args.platform == 'windows' else 'BalanceOfPower')
+    if previous_launcher.exists():
+        try:
+            # Opening without truncation detects an executable locked by a
+            # running instance before any adjacent game resources are replaced.
+            with previous_launcher.open('r+b'):
+                pass
+        except OSError as exc:
+            parser.error('Existing bundle is locked or not writable; choose a separate --output-root. ' + str(exc))
     output.mkdir(parents=True, exist_ok=True)
     run([godot, '--headless', '--editor', '--path', str(project), '--import', '--quit'])
     preset = {'linux':'Linux','windows':'Windows','macos':'macOS'}[args.platform]
@@ -100,6 +111,7 @@ def main():
     for source in (ROOT / 'godot/assets/advisors/ATTRIBUTION.md', ROOT / 'godot/assets/advisors/manifest.json', ROOT / 'godot/assets/music/ATTRIBUTION.md', ROOT / 'godot/assets/music/licensed_tracks.json'):
         shutil.copy2(source, credits / (source.parent.name + '-' + source.name))
     shutil.copy2(ROOT / 'godot/assets/ATTRIBUTION.md', credits / 'GAME-ASSETS.md')
+    shutil.copy2(ROOT / 'godot/assets/cities/README.md', credits / 'CITY-MODELS.md')
     for name in ('GODOT-LICENSE.txt', 'GODOT-COPYRIGHT.txt'):
         shutil.copy2(ROOT / 'packaging/godot' / name, credits / name)
     pyinstaller = importlib.metadata.distribution('pyinstaller')

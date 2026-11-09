@@ -1,6 +1,42 @@
 extends Control
 
 signal country_selected(country_id: int)
+signal city_selected(city: Dictionary)
+signal event_selected(event: Dictionary)
+signal route_selected(route: Dictionary)
+var route_hit_regions: Array = []
+var hovered_route: Dictionary = {}
+var event_hit_regions: Array = []
+signal city_hovered(city: Dictionary)
+const CityModels = preload("res://scripts/city_models.gd")
+var map_state: Dictionary = {}
+var anchor_cache: Dictionary = {}
+var cities: Array = []
+var routes: Array = []
+var map_events: Array = []
+var city_hit_regions: Array = []
+var hovered_city: Dictionary = {}
+var layers := {"cities": true, "roads": true, "events": true, "labels": true}
+
+func apply_map_state(data: Dictionary) -> void:
+ map_state = data
+ cities = data.get("cities", [])
+ routes = data.get("routes", [])
+ map_events = data.get("events", [])
+ queue_redraw()
+
+func set_layer(layer: String, enabled: bool) -> void:
+ layers[layer] = enabled
+ if not enabled:
+  if layer == "cities":
+   city_hit_regions.clear()
+   hovered_city.clear()
+  elif layer == "roads":
+   route_hit_regions.clear()
+   hovered_route.clear()
+  elif layer == "events": event_hit_regions.clear()
+ queue_redraw()
+
 const L = preload("res://scripts/locale.gd")
 var polygons: Array = []
 var countries: Array = []
@@ -13,12 +49,14 @@ var pan := Vector2.ZERO
 var dragging := false
 var reduced_motion := false
 var selection_glow := 0.0
+var atmosphere_time := 0.0
+var atmosphere_frame := 0.0
 var selection_tween: Tween
 var colorblind := false:
  set(value):
   colorblind = value
   queue_redraw()
-var relief_enabled := false:
+var relief_enabled := true:
  set(value):
   relief_enabled = value
   queue_redraw()
@@ -42,6 +80,7 @@ func _ready() -> void:
  relief_layer.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
  var shade := ShaderMaterial.new()
  shade.shader = preload("res://scripts/relief.gdshader")
+ shade.set_shader_parameter("land_mask", preload("res://assets/terrain_mask.png"))
  relief_layer.material = shade
  add_child(relief_layer)
  foreground = Foreground.new()
@@ -64,7 +103,7 @@ func _ready() -> void:
   if not points.is_empty(): outline.append(points[0])
   polygons.append({"id": int(entry.id), "points": points, "vertices": vertices, "indices": indices, "outline": outline})
  resized.connect(queue_redraw)
- mouse_exited.connect(func(): hovered = -1; queue_redraw())
+ mouse_exited.connect(func(): hovered = -1; hovered_city.clear(); hovered_route.clear(); queue_redraw())
 
 func update_world(data: Array, selection: int) -> void:
  countries = data
@@ -86,6 +125,12 @@ func apply_report(report: Dictionary) -> void:
  queue_redraw()
 
 func _process(_delta: float) -> void:
+ if not reduced_motion and zoom >= 2.3 and layers.get("events",true):
+  atmosphere_time += _delta
+  atmosphere_frame += _delta
+  if atmosphere_frame >= 1.0/12.0:
+   atmosphere_frame = 0.0
+   if is_instance_valid(foreground): foreground.queue_redraw()
  if selection_glow > 0:
   queue_redraw()
 
@@ -124,7 +169,7 @@ func presentation_color(value: String) -> Color:
  return Color(str(safe_colors.get(value.to_lower(), value))) if colorblind else Color(value)
 
 func _draw() -> void:
- draw_rect(Rect2(Vector2.ZERO, size), Color("193b50"))
+ draw_rect(Rect2(Vector2.ZERO, size), Color("193747"))
  var transform := transform_map()
  draw_set_transform_matrix(transform)
  var line_width := 1.0 / transform.get_scale().x
@@ -132,6 +177,12 @@ func _draw() -> void:
   draw_line(Vector2(x, 0), Vector2(x, 483), Color(0.55, 0.7, 0.77, 0.07), line_width)
  for y in range(0, 484, 69):
   draw_line(Vector2(0, y), Vector2(948, y), Color(0.55, 0.7, 0.77, 0.07), line_width)
+ # A lowered coastline face gives the map a physical edge.
+ for polygon in polygons:
+  if polygon.points.size() >= 3:
+   var lowered: PackedVector2Array = polygon.vertices.duplicate()
+   for k in range(lowered.size()): lowered[k] += Vector2(0, 2.8)
+   RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), polygon.indices, lowered, PackedColorArray([Color("172b32")]))
  for polygon in polygons:
   var points: PackedVector2Array = polygon.points
   if points.size() < 3:
@@ -153,12 +204,20 @@ func draw_foreground(surface: Control) -> void:
   if polygon.id == selected and polygon.points.size() >= 3:
    surface.draw_polyline(polygon.outline, Color("f4df9d"), line_width * (2.4 + selection_glow * 2.5), true)
  surface.draw_set_transform_matrix(Transform2D.IDENTITY)
+ draw_living_map(surface, transform)
  var font := ThemeDB.fallback_font
- if hovered >= 0:
-  var label := L.country(hovered)
+ if hovered >= 0 or not hovered_route.is_empty():
+  var label := L.country(hovered) if hovered >= 0 else ""
+  var country_status := scene_country(hovered)
+  if not hovered_city.is_empty():
+   label += " · " + ("Условная городская модель" if L.language == "ru" else "Illustrative city model")
+  if not country_status.is_empty():
+   label += " · " + str(country_status.get("insurgency_label_ru" if L.language == "ru" else "insurgency_label", ""))
   if report_values.has(hovered):
    var value := str(report_values[hovered].get("label_ru" if L.language == "ru" else "label", ""))
    if not value.is_empty(): label += ": " + value
+  if not hovered_route.is_empty():
+   label = L.country(int(hovered_route.actor))+" → "+L.country(int(hovered_route.target))+": "+str(hovered_route.get("label_ru" if L.language == "ru" else "label",""))+" · "+str(hovered_route.get("value_label_ru" if L.language == "ru" else "value_label",""))
   var extent := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17)
   var at := get_local_mouse_position() + Vector2(16, -34)
   at.x = clampf(at.x, 8, maxf(8, size.x - extent.x - 24))
@@ -184,23 +243,238 @@ func _gui_input(event: InputEvent) -> void:
   if dragging:
    pan += event.relative
   hovered = hit(event.position)
+  hovered_route = route_at(event.position)
+  var next_city := city_at(event.position)
+  if next_city != hovered_city:
+   hovered_city = next_city
+   city_hovered.emit(hovered_city)
   queue_redraw()
  elif event is InputEventMouseButton:
   if event.button_index == MOUSE_BUTTON_MIDDLE:
    dragging = event.pressed
   elif event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
    grab_focus()
-   var country := hit(event.position)
+   for region in event_hit_regions:
+    if region.rect.has_point(event.position):
+     event_selected.emit(region.event)
+     country_selected.emit(int(region.event.country_id))
+     accept_event()
+     return
+   var route := route_at(event.position)
+   if not route.is_empty() and city_at(event.position).is_empty():
+    route_selected.emit(route)
+    accept_event()
+    return
+   var city := city_at(event.position)
+   if not city.is_empty():
+    city = city.duplicate()
+    city["status"] = scene_country(int(city.get("country_id",-1)))
+    city["events"] = map_events.filter(func(item): return int(item.get("country_id",-2)) == int(city.get("country_id",-1)))
+    city_selected.emit(city)
+   var country := int(city.get("country_id", hit(event.position)))
    if country >= 0:
     country_selected.emit(country)
+    if event.double_click:
+     zoom = maxf(zoom,3.2)
+     pan = Vector2.ZERO
+     pan += size/2.0 - transform_map()*country_anchor(country)
+     queue_redraw()
   elif event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
    var before: Vector2 = transform_map().affine_inverse() * event.position
-   zoom = clampf(zoom * (1.16 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 0.86), 1.0, 5.0)
+   zoom = clampf(zoom * (1.16 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 0.86), 1.0, 9.0)
    pan += event.position - transform_map() * before
    queue_redraw()
   accept_event()
  elif event is InputEventKey and event.pressed:
-  if event.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]:
+  if event.keycode == KEY_F:
+   fit_map()
+   accept_event()
+  elif event.keycode in [KEY_PLUS, KEY_EQUAL, KEY_MINUS]:
+   var center := transform_map().affine_inverse()*(size/2.0)
+   zoom = clampf(zoom*(0.86 if event.keycode == KEY_MINUS else 1.16),1.0,9.0)
+   pan += size/2.0-transform_map()*center
+   queue_redraw()
+   accept_event()
+  elif event.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]:
    var next := posmod(selected + (-1 if event.keycode in [KEY_LEFT, KEY_UP] else 1), 80)
    country_selected.emit(next)
    accept_event()
+
+func country_anchor(id: int) -> Vector2:
+ if anchor_cache.has(id): return anchor_cache[id]
+ # Largest interior triangle is robust for concave and island countries.
+ var best := Vector2.ZERO
+ var area := -1.0
+ for polygon in polygons:
+  if int(polygon.id) != id: continue
+  var vertices: PackedVector2Array = polygon.vertices
+  for i in range(0, vertices.size()-2, 3):
+   var a := vertices[i]
+   var b := vertices[i+1]
+   var c := vertices[i+2]
+   var candidate := absf((b-a).cross(c-a))
+   if candidate > area:
+    area = candidate
+    best = (a+b+c)/3.0
+ anchor_cache[id] = best
+ return best
+
+func city_at(at: Vector2) -> Dictionary:
+ for i in range(city_hit_regions.size()-1,-1,-1):
+  if city_hit_regions[i].rect.has_point(at): return city_hit_regions[i].city
+ return {}
+
+func scene_country(id: int) -> Dictionary:
+ for row in map_state.get("countries", []):
+  if int(row.get("id", -1)) == id: return row
+ return {}
+
+func draw_living_map(surface: Control, transform: Transform2D) -> void:
+ var font := ThemeDB.fallback_font
+ var local_cities: Array = cities
+ if local_cities.is_empty():
+  local_cities = []
+  for row in countries:
+   var id := int(row.get("id", local_cities.size()))
+   var anchor := country_anchor(id)
+   local_cities.append({"id":id,"country_id":id,"x":anchor.x,"y":anchor.y,"name":L.country(id),"schematic":true})
+ route_hit_regions.clear()
+ if layers.get("roads",true):
+  for route in grouped_routes():
+   var actor := int(route.get("actor",-1))
+   var target := int(route.get("target",-1))
+   if actor < 0 or target < 0: continue
+   # Detail view concentrates on the selected country's commitments.
+   if selected >= 0 and actor != selected and target != selected: continue
+   var a := transform * country_anchor(actor)
+   var b := transform * country_anchor(target)
+   var points := PackedVector2Array()
+   var bend := Vector2(0,-minf(70,(b-a).length()*0.18))
+   for step in range(25):
+    var t := float(step)/24.0
+    points.append(a.lerp(b,t)+bend*4.0*t*(1.0-t))
+   route_hit_regions.append({"points":points,"route":route})
+   var kind := str(route.get("kind",""))
+   var ink := Color("c5c89c") if kind == "mixed" else Color("dfb76d") if "insurgent" in kind else Color("8cc7d0")
+   surface.draw_polyline(points,Color(0.04,0.1,0.14,0.7),4.0,true)
+   surface.draw_polyline(points,ink,1.4,true)
+   var direction := (points[24]-points[23]).normalized()
+   surface.draw_colored_polygon(PackedVector2Array([b,b-direction.rotated(0.5)*8,b-direction.rotated(-0.5)*8]),ink)
+ city_hit_regions.clear()
+ var unit := clampf(0.50+zoom*0.14,0.64,1.75)
+ var occupied: Array[Rect2] = []
+ # Labels use screen coordinates to remain readable through zoom.
+ for city in local_cities:
+  var id := int(city.get("country_id",city.get("id",0)))
+  var at := transform * Vector2(float(city.get("x",0)),float(city.get("y",0)))
+  if not Rect2(Vector2(-50,-50),size+Vector2(100,100)).has_point(at): continue
+  var important := id == selected or id == hovered or id < 2
+  var status := scene_country(id)
+  var active := int(status.get("insurgency",6)) <= 2 or int(status.get("event",0)) > 0
+  if layers.get("cities",true) and (zoom >= 1.7 or important or id % 3 == 0):
+   CityModels.draw_city(surface,at,unit,id,id < 2,active)
+   city_hit_regions.append({"rect":Rect2(at+Vector2(-18,-27)*unit,Vector2(37,39)*unit),"city":city})
+  if layers.get("labels",true) and (zoom >= 2.8 or important):
+   var text := str(city.get("name_ru",city.get("name",""))) if L.language == "ru" else str(city.get("name",""))
+   var font_size := 14 if important else 12
+   var extent := font.get_string_size(text,HORIZONTAL_ALIGNMENT_LEFT,-1,font_size)
+   var rect := Rect2(at+Vector2(-extent.x/2,10*unit),extent+Vector2(8,5))
+   var overlaps := false
+   for previous in occupied:
+    if previous.intersects(rect): overlaps = true; break
+   if not overlaps or important:
+    occupied.append(rect)
+    var baseline := rect.position+Vector2(0,font_size)
+    surface.draw_string_outline(font,baseline,text,HORIZONTAL_ALIGNMENT_LEFT,-1,font_size,4,Color("142d3a"))
+    surface.draw_string(font,baseline,text,HORIZONTAL_ALIGNMENT_LEFT,-1,font_size,Color("ece7cf") if important else Color("ced7ce"))
+ event_hit_regions.clear()
+ if layers.get("events",true):
+  var event_slots: Dictionary = {}
+  for event in visible_map_events():
+   var id := int(event.get("country_id",-1))
+   if id < 0: continue
+   var at := transform * country_anchor(id)
+   if not Rect2(Vector2(-40,-40),size+Vector2(80,80)).has_point(at): continue
+   var kind := str(event.get("kind",""))
+   var ink := Color("df986b") if kind in ["civil_war","war","armed_attacks"] else Color("e5c67e")
+   # Open warning chevrons sit apart from the architecture, rather than covering it.
+   var slot := int(event_slots.get(id, 0))
+   event_slots[id] = slot + 1
+   var crest := at+Vector2(19,-17)*unit + Vector2(0, slot*27)
+   event_hit_regions.append({"rect":Rect2(crest-Vector2(9,10),Vector2(20,25)),"event":event})
+   if zoom >= 2.3:
+    if kind in ["civil_war","insurgency","war"]:
+     for plume in range(4):
+      var drift := 0.0
+      if not reduced_motion and id in [selected,hovered]: drift = sin(atmosphere_time*1.4+float(plume))*1.5
+      var smoke_at := at+Vector2(14+plume*2+drift,-8-plume*5-absf(drift))*unit
+      surface.draw_circle(smoke_at,(3.0+plume)*unit,Color(0.2,0.23,0.23,0.7-float(plume)*0.12))
+     surface.draw_colored_polygon(PackedVector2Array([at+Vector2(10,-3)*unit,at+Vector2(13,-13)*unit,at+Vector2(17,-2)*unit]),Color("df986b"))
+    else:
+     for person in range(5):
+      var person_at := at+Vector2(15+person*3,4+posmod(person,2)*2)*unit
+      surface.draw_circle(person_at-Vector2(0,4)*unit,1.1*unit,Color("e5c67e"))
+      surface.draw_line(person_at-Vector2(0,2)*unit,person_at+Vector2(0,3)*unit,Color("444b49"),2*unit)
+     surface.draw_line(at+Vector2(20,4)*unit,at+Vector2(20,-7)*unit,Color("cfbe8f"),unit)
+     surface.draw_rect(Rect2(at+Vector2(17,-10)*unit,Vector2(8,5)*unit),Color("e0d3aa"))
+   surface.draw_polyline(PackedVector2Array([crest+Vector2(-5,4),crest+Vector2(0,-5),crest+Vector2(5,4)]),ink,2.2,true)
+   surface.draw_line(crest+Vector2(-5,7),crest+Vector2(5,7),ink,2.2,true)
+   if zoom > 3 or id == selected:
+    var text := str(event.get("label_ru" if L.language == "ru" else "label",kind))
+    if text.length() > 44: text = text.left(41)+"…"
+    var baseline := crest+Vector2(10,5)
+    var text_size := font.get_string_size(text,HORIZONTAL_ALIGNMENT_LEFT,-1,12)
+    var event_rect := Rect2(baseline-Vector2(0,12),text_size+Vector2(6,5))
+    var clear := true
+    for previous in occupied:
+     if previous.intersects(event_rect): clear = false; break
+    if clear or id == selected:
+     occupied.append(event_rect)
+     surface.draw_string_outline(font,baseline,text,HORIZONTAL_ALIGNMENT_LEFT,-1,12,4,Color("142d3a"))
+     surface.draw_string(font,baseline,text,HORIZONTAL_ALIGNMENT_LEFT,-1,12,ink)
+
+func grouped_routes() -> Array:
+ var groups: Dictionary = {}
+ for route in routes:
+  var key := str(route.get("actor", -1)) + ":" + str(route.get("target", -1))
+  if not groups.has(key):
+   groups[key] = route.duplicate(true)
+   groups[key]["commitments"] = []
+  groups[key].commitments.append(route)
+ var result: Array = []
+ for route in groups.values():
+  var count := int(route.commitments.size())
+  if count > 1:
+   route.kind = "mixed"
+   route.label = "Policy connections"
+   route.label_ru = "Политические связи"
+   route.value_label = str(count) + " commitments"
+   route.value_label_ru = "Обязательств: " + str(count)
+  result.append(route)
+ return result
+
+func visible_map_events() -> Array:
+ var ordered := map_events.duplicate()
+ var priority := {"civil_war": 0, "war": 0, "revolution": 1, "coup": 2, "insurgency": 3, "unrest": 4}
+ ordered.sort_custom(func(a, b): return int(priority.get(a.get("kind", ""), 5)) < int(priority.get(b.get("kind", ""), 5)))
+ var result: Array = []
+ var seen: Dictionary = {}
+ for event in ordered:
+  var id := int(event.get("country_id", -1))
+  var kind := str(event.get("kind", ""))
+  if zoom < 2.3 and id not in [selected, hovered]:
+   # The world view emphasizes major developments. Minor assessments and
+   # multiple events become visible when focusing a country or zooming in.
+   if kind == "unrest" or (kind == "insurgency" and int(scene_country(id).get("insurgency", 6)) > 1): continue
+   if seen.has(id): continue
+  seen[id] = true
+  result.append(event)
+ return result
+
+func route_at(at: Vector2) -> Dictionary:
+ for region in route_hit_regions:
+  var points: PackedVector2Array = region.points
+  for i in range(points.size()-1):
+   if Geometry2D.get_closest_point_to_segment(at,points[i],points[i+1]).distance_to(at) < 6.0:
+    return region.route
+ return {}

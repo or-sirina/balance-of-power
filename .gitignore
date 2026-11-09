@@ -145,3 +145,4 @@ save.dat
 godot/.godot/
 godot/export.cfg
 dist-godot/
+dist-godot-*/

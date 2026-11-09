@@ -11,6 +11,7 @@ const Reports = preload("res://scripts/reports.gd")
 const AISettings = preload("res://scripts/ai_settings.gd")
 const AdvisorPanel = preload("res://scripts/advisor_panel.gd")
 const SoundSignals = preload("res://scripts/sound_signals.gd")
+const MapPanel = preload("res://scripts/map_panel.gd")
 const INK = Color("152f40")
 const PAPER = Color("e7eadf")
 const MUTED = Color("9bb2bf")
@@ -22,7 +23,8 @@ var guide_panel: PanelContainer
 var game_visible := false
 var colorblind := false
 var sfx_enabled := true
-var relief_enabled := false
+var relief_enabled := true
+var map_layers := {"cities": true, "roads": false, "events": true, "labels": true}
 var sound_signals: Node
 var network_state: Dictionary = {}
 var network_poll_pending := false
@@ -46,6 +48,7 @@ var year_label: Label
 var score_label: Label
 var country_label: Label
 var facts_label: Label
+var map_details_box: VBoxContainer
 var status_label: Label
 var policies_box: VBoxContainer
 var news_box: VBoxContainer
@@ -139,7 +142,8 @@ func _load_preferences() -> void:
   track_index = config.get_value("audio", "track", 0)
   colorblind = config.get_value("ui", "colorblind", false)
   sfx_enabled = config.get_value("audio", "sfx", true)
-  relief_enabled = config.get_value("ui", "relief", false)
+  relief_enabled = config.get_value("ui", "relief", true)
+  for layer in map_layers: map_layers[layer] = bool(config.get_value("map", layer, map_layers[layer]))
 
 func _save_preferences() -> void:
  if smoke_test:
@@ -153,6 +157,7 @@ func _save_preferences() -> void:
  config.set_value("audio", "sfx", sfx_enabled)
  config.set_value("ui", "colorblind", colorblind)
  config.set_value("ui", "relief", relief_enabled)
+ for layer in map_layers: config.set_value("map", layer, map_layers[layer])
  config.save("user://presentation.cfg")
 
 func _style(color: Color, radius: int = 4) -> StyleBoxFlat:
@@ -311,6 +316,9 @@ func _build_ui() -> void:
  map_source_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  map_toolbar.add_child(map_source_label)
  map_toolbar.add_child(_button(L.text("reset_map"), func(): map_view.fit_map()))
+ var layers_button := _button("Слои" if L.language == "ru" else "Layers", _open_map_layers)
+ layers_button.name = "MapLayersButton"
+ map_toolbar.add_child(layers_button)
  left.add_child(map_toolbar)
  map_toolbar.add_child(_button(L.text("country_short"), func(): _toggle_drawer(country_drawer)))
  map_toolbar.add_child(_button(L.text("news"), func(): _toggle_drawer(news_drawer)))
@@ -320,7 +328,11 @@ func _build_ui() -> void:
  map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
  map_view.reduced_motion = reduced_motion
  map_view.set("colorblind", colorblind)
+ for layer in map_layers: map_view.set_layer(layer, map_layers[layer])
  map_view.country_selected.connect(_select_country)
+ map_view.city_selected.connect(func(city): _map_briefing(int(city.country_id)))
+ map_view.event_selected.connect(func(event): _map_briefing(int(event.country_id), event))
+ map_view.route_selected.connect(_map_route_briefing)
  left.add_child(map_view)
  map_legend = HFlowContainer.new()
  map_legend.add_theme_constant_override("h_separation", 16)
@@ -373,6 +385,8 @@ func _build_ui() -> void:
  facts_label = _label("", 15, PAPER, true)
  content.add_child(facts_label)
  content.add_child(HSeparator.new())
+ map_details_box = VBoxContainer.new()
+ content.add_child(map_details_box)
  policies_box = VBoxContainer.new()
  content.add_child(policies_box)
  crisis_box = VBoxContainer.new()
@@ -562,6 +576,7 @@ func _render_state() -> void:
  score_label.text = "%s  %s  /  %s  %s\n%s: %s ±%s" % [L.country(0), int(scores[0]), L.country(1), int(scores[1]), L.text("tension"), int(state.tension), int(state.get("tension_error", 34))]
  var selected := int(state.get("selected_country", -1)) if state.get("selected_country") != null else -1
  map_view.update_world(state.countries, selected)
+ map_view.apply_map_state(state.get("map_scene", {}))
  _request_map_report.call_deferred()
  if selected >= 0:
   country_picker.select(selected)
@@ -596,6 +611,7 @@ func _render_state() -> void:
    row.add_child(_button(L.text("challenge"), func(): _command("question", {"news_id": int(item.id)})))
   news_box.add_child(row)
  _render_crisis()
+ MapPanel.render_details(self, map_details_box)
  policies_box.visible = not bool(state.crisis.active) and not network_state.get("duel") is Dictionary
  if state.get("tutorial") is Dictionary:
   guide_enabled = state.tutorial.get("active", false)
@@ -1479,6 +1495,18 @@ func _open_preferences() -> void:
  column.add_child(_button("Русский" if L.language == "en" else "English", _change_language))
  column.add_child(_button(L.text("ai_settings"), _open_ai_settings))
  column.add_child(_button(L.text("intelligence"), _intelligence_dialog))
+
+func _open_map_layers() -> void:
+ MapPanel.show_layers(self)
+
+func _map_briefing(country_id: int, event: Dictionary = {}) -> void:
+ if event.is_empty():
+  _show_drawer(country_drawer)
+ else:
+  MapPanel.show_event(self, country_id, event)
+
+func _map_route_briefing(route: Dictionary) -> void:
+ MapPanel.show_route(self, route)
 
 func _populate_map_modes() -> void:
  map_picker.clear()

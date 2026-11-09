@@ -27,6 +27,7 @@ from .tutorial import TutorialSession
 from .conversations import ConversationBook
 from .reports import ReportError, build_report
 from .multiplayer import MultiplayerController
+from .map_scene import build_map_scene
 from .settings import SettingsError, SettingsService
 
 
@@ -845,7 +846,8 @@ class GameService:
                 "tension": w.knownNastiness[side], "intelligence": w.intel[side],
                 "intl_relations": w.USA.diplOpinion[1], "credibility": actor.integrity,
                 "tension_error": MovePlanner.estimate_error(w.intel[side]),
-                "countries": countries, "selected_country": self.selected_country, "selection": selection,
+                "countries": countries, "map_scene": build_map_scene(w),
+                "selected_country": self.selected_country, "selection": selection,
                 "news": [{"id": i, "text": n.text, "text_ru": news_ru(n), "type_ru": type_ru(n),
                           "actor": n.actor.id, "target": n.target.id, "host": n.host.id,
                           "action": n.action, "old": n.old, "new": n.new,

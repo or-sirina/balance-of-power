@@ -26,6 +26,8 @@ Use `--language en` or `--language ru` to select a presentation language. The st
 
 Multiplayer supports LAN hosting and joining, discovery, chat and reconnection, a teacher byte-forwarding relay, hotseat, and play-by-mail via a shared folder. Godot networking uses `engine-bridge-v1` over BOP1 framing and does not crossplay directly with older Qt clients. The Qt application remains available.
 
+The [interactive map prototype](LIVING_MAP.md) adds original 3D city miniatures with streets and trees, stronger terrain relief, conflict/unrest scenes, clickable event briefings and aid/trade links. The Layers menu keeps these overlays optional. Wheel or +/− zoom, double-click focuses a country, and F restores the world view. Country positions remain schematic until the geographic map is replaced.
+
 ## Architecture and settings
 
 `EngineBridge` hosts the Python engine in the launcher process. Godot sends JSON commands to a loopback HTTP server (`POST /command`) with a per-launch bearer token. The server returns game state and command results; the Python engine remains responsible for game rules and save data. The launcher stops the server and game together. This local protocol is an implementation interface, not a public remote service. The Python core is retained: there is no measured need to rewrite it. A local benchmark of optimized state/select operations was around 1 ms; this is not a performance guarantee.
