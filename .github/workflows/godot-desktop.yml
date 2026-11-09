@@ -1,0 +1,62 @@
+name: Godot native desktop builds
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: godot-desktop-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+          - runner: windows-2022
+            platform: windows
+          - runner: macos-14
+            platform: macos
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.10'
+      - name: Install packaging tools
+        # Qt is needed only for parity tests against the original interface.
+        run: python -m pip install pyinstaller==6.19.0 PyQt5==5.15.11
+      - name: Install verified Godot editor and templates
+        shell: bash
+        run: python tools/install_godot_ci.py --github-env "$GITHUB_ENV"
+      - name: Source bridge and Godot smoke tests
+        shell: bash
+        run: |
+          python tools/run_godot.py --headless --smoke-test
+          python -m unittest discover -s tests -p 'test_*.py' -q
+      - name: Build native bundle
+        shell: bash
+        run: python tools/build_godot.py --platform ${{ matrix.platform }}
+      - name: Smoke test frozen bundle
+        shell: bash
+        run: |
+          if [ '${{ matrix.platform }}' = windows ]; then
+            dist-godot/windows/BalanceOfPower.exe --headless --smoke-test
+          else
+            dist-godot/${{ matrix.platform }}/BalanceOfPower --headless --smoke-test
+          fi
+      - name: Upload bundle after smoke test
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BalanceOfPower-${{ matrix.platform }}
+          path: |
+            dist-godot/BalanceOfPower-${{ matrix.platform }}.tar.gz
+            dist-godot/BalanceOfPower-${{ matrix.platform }}.zip
+          if-no-files-found: error
+          retention-days: 14

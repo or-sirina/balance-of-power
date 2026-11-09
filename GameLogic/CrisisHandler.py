@@ -5,6 +5,21 @@ from random import randint
 import Local
 from constants import WORLD_EVENT
 
+
+def _display_reaction(newsWindow, world, speaker, is_minor, backed_down,
+                      outcome=None, headline_text=None):
+    """Keep the original immediate display, then optionally request prose only."""
+    newsWindow.reactionLine.setText(Local.generateReactionLine(
+        speaker, world.crisis.level, is_minor, backed_down))
+    _queue_dialogue(newsWindow, world, speaker, outcome or (
+        "backed_down" if backed_down else "stood_firm"), headline_text)
+
+
+def _queue_dialogue(newsWindow, world, speaker, outcome, headline_text=None):
+    queue = getattr(newsWindow, "queueCrisisDialogue", None)
+    if queue is not None:
+        queue(world, world.crisis.whichHead, speaker.id, outcome, headline_text)
+
 def getAdvisorOpinion(world, news, bias, **kwargs):
     """
     Get advisor opinion whether the news should be a matter of international escalation
@@ -154,6 +169,7 @@ def hangLoose(newsWindow, world, loser, winner, victim):
     """
     crisis = world.crisis
     n = crisis.whichHead
+    dialogue_headline = getattr(n, "text", None)
     n.isQuestioned = False
     if crisis.level < 8:
         # No penalty for early withdrawal
@@ -187,7 +203,7 @@ def hangLoose(newsWindow, world, loser, winner, victim):
     if x > victim.dMess: x = victim.dMess
     if loser.id == 0: x = -x
     changeDMess(world, victim, x)
-    newsWindow.reactionLine.setText(Local.generateReactionLine(loser, crisis.level, False, True))
+    _display_reaction(newsWindow, world, loser, False, True, headline_text=dialogue_headline)
     newsWindow.question.setEnabled(False)
     newsWindow.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][1])
 
@@ -230,7 +246,7 @@ def hangTough(newsWindow, world, actor):
         world.beingQuestioned = False
         #world.quitFlag = True
         newsWindow.parent.endGame()
-    newsWindow.reactionLine.setText(Local.generateReactionLine(actor, crisis.level, False, False))
+    _display_reaction(newsWindow, world, actor, False, False)
 
 #: Policies a minor country can carry out (CompuAI/MinorAI: military aid, aid to
 #: insurgents, intervention for either side).  Every other verb has no policy
@@ -289,6 +305,7 @@ def _open_crisis_panel(newsWindow, world, headline):
             newsWindow.picture[i].setVisible(True)
         newsWindow.newsHline.setText(headline.text)
         newsWindow.setVisible(True)
+    _queue_dialogue(newsWindow, world, world.country[1-c.who.id], "challenge")
 
 
 def _show_penalties(newsWindow, world, headline):
@@ -359,8 +376,10 @@ def resumeCrisis(newsWindow, world):
         newsWindow.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][0])
         newsWindow.question.setEnabled(c.level > 1)
         newsWindow.setLocked(True)
-        newsWindow.reactionLine.setText(Local.generateReactionLine(c.who, c.level, True, False))
+        _display_reaction(newsWindow, world, c.who, True, False, outcome="restored")
         newsWindow.question.setText(Local.strings[Local.CRISIS_MINOR_BUTTON][max(0, c.level - 1)])
+    if c.who.id < 2:
+        _queue_dialogue(newsWindow, world, world.country[world.cmptr], "restored")
     newsWindow.setVisible(True)
     return True
 
@@ -410,12 +429,12 @@ def minorTough(newsWindow, world):
     x = (128 >> c.level) if c.level > 1 else 0     # CASE has no entry for level 1
     # Worsen diplomatic relations
     changeDiplOpinion(c.who, world.country[world.human], -x)
-    newsWindow.reactionLine.setText(Local.generateReactionLine(c.who, c.level, True, False))
+    _display_reaction(newsWindow, world, c.who, True, False)
 
     # Minor countries will never escalate into nuclear war
     if c.level < 2:
         c.backDown, c.hasBegun = True, False
-        newsWindow.reactionLine.setText(Local.generateReactionLine(c.who, c.level, True, True))
+        _display_reaction(newsWindow, world, c.who, True, True)
         newsWindow.question.setEnabled(False)
         newsWindow.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][1])
     newsWindow.question.setText(Local.strings[Local.CRISIS_MINOR_BUTTON][c.level-1])
@@ -446,7 +465,7 @@ def minorCrisis(newsWindow, world, news):
     else:
         c.backDown, c.hasBegun, c.whichHead.crisisVal = True, False, True
         doPolicy(world, c.who, c.victim, news.action, news.old, crisis=True)
-        newsWindow.reactionLine.setText(Local.generateReactionLine(c.who, c.level, True, True))
+        _display_reaction(newsWindow, world, c.who, True, True)
         newsWindow.question.setEnabled(False)
         newsWindow.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][1])
 
@@ -533,8 +552,7 @@ def doCHumanLoose(newsWindow, world, news):
         # First click - do the back down
         if not c.backDown:
             c.backDown, c.hasBegun = True, False
-            newsWindow.reactionLine.setText(Local.generateReactionLine(world.country[world.human],
-                c.level, True, True))
+            _display_reaction(newsWindow, world, world.country[world.human], True, True)
             newsWindow.question.setEnabled(False)
             newsWindow.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][1])
         # Click one more time to exit

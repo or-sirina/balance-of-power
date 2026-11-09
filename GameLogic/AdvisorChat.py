@@ -32,15 +32,19 @@ from the same lookup functions, so the advice stays consistent with the rules
 instead of being decorative — and it still makes a scoreable prediction.
 """
 
+import json
 import re
+from functools import lru_cache
 
 import Local
+import Paths
 from GameLogic.AdvisorMemory import DOWN, HOLD, UP, store
 from GameLogic.Advisors import roster
-from GameLogic.Globals import (econAidMax, govtAidMax, influence, insgAidMax,
-                              intvGovtMax, intvInsgMax, maxPolicy, treatyMax)
+from GameLogic.Globals import econConv, influence, intvConv, mAidConv, maxPolicy
 from GameLogic.LLMClient import (Deadline, LLMClient, LLMConfig, LLMError,
                                  is_decision_model)
+from GameLogic.PolicyRules import UNIT_MODES, policy_info
+from constants import AVL_ACTIONS
 
 #: How many countries to name in the briefing.  More makes the prompt expensive
 #: without making the advice better.
@@ -73,6 +77,10 @@ the other advisors.
 - Reason only from the situation below. The FACTS section, when there is one, is \
 read from the current game state and is authoritative: use its numbers, and do not \
 state a number for a country that is neither in FACTS nor in the situation brief.
+- Recommend policy levels only from the supplied legal steps; an unavailable \
+verb cannot be used. Current levels can remain legal above a ceiling for raises. \
+The country's opinion of us determines our standing; our opinion of that \
+country is a separate number used by policy acceptance. Do not swap them.
 - If you need the numbers for another country, answer with a single line \
 "FACTS: <country>" and nothing else; you will be asked again with those facts.
 - Finish with exactly one line of this form, and nothing after it:
@@ -242,6 +250,24 @@ def chat_config(config):
 
 # -- country lookup ---------------------------------------------------------
 
+@lru_cache(maxsize=1)
+def _russian_country_names():
+    try:
+        with open(Paths.data("country_names_ru.json"), encoding="utf-8") as handle:
+            names = json.load(handle)
+        return tuple(names) if isinstance(names, list) and all(isinstance(n, str) for n in names) else ()
+    except (OSError, ValueError):
+        return ()
+
+
+def _russian_country_name(world, country):
+    target = resolve_country(world, country)
+    names = _russian_country_names()
+    if target is not None and 0 <= target.id < len(names):
+        return names[target.id]
+    return country_name(world, country)
+
+
 def country_words(world):
     """``[(lowercased name/adjective/genitive, country id), ...]``, longest first."""
     key = (id(Local.strings), len(Local.strings))
@@ -264,6 +290,11 @@ def country_words(world):
                 continue
             if isinstance(value, str) and len(value) >= 4:
                 words.append((value.lower(), index))
+    # Russian UI questions can arrive while the legacy simulation locale is
+    # English. Add aliases without changing global strings in a worker thread.
+    for index, name in enumerate(_russian_country_names()[:total]):
+        if len(name) >= 3:
+            words.append((name.lower(), index))
     # Longest first, so "south korea" is matched before "korea".
     words.sort(key=lambda item: -len(item[0]))
     _WORDS["key"] = key
@@ -370,11 +401,25 @@ def country_facts(world, side, country):
         "country": country_name(world, target),
         "id": int(target.id),
         "leader": str(getattr(target, "leaderName", "")),
-        "worth": int(getattr(target, "prestigeVal", 0)) // 64,
-        "our_standing": int(me.diplOpinion[target.id]),
-        "their_standing": int(them.diplOpinion[target.id]),
+        # The Close-Up and Prestige value map display this weight at 1/8 of
+        # the raw rules value. It is not the country's current contribution
+        # to either side's score, which also depends on incoming opinion.
+        "prestige_value": int(getattr(target, "prestigeVal", 0)) // 8,
+        "worth": int(getattr(target, "prestigeVal", 0)) // 8,  # compatibility alias
+        # Standing is the country's opinion of the superpower: this is the
+        # direction used by prestige/scoring. Policy acceptance uses the other
+        # direction, which can differ and is explicitly reported below.
+        "our_standing": int(target.diplOpinion[side]),
+        "their_standing": int(target.diplOpinion[1 - side]),
+        "country_opinion_of_us": int(target.diplOpinion[side]),
+        "country_opinion_of_them": int(target.diplOpinion[1 - side]),
+        "our_opinion_of_country": int(me.diplOpinion[target.id]),
+        "their_opinion_of_country": int(them.diplOpinion[target.id]),
         "sphere": int(getattr(target, "dMess", 0)),
-        "stability": _safe(lambda: target.getInsurgency(), 6),  # 0 civil war .. 6 peaceful
+        # This is insurgency, available even on Beginner. It is not the
+        # government-stability indicator, which is hidden at that difficulty.
+        "insurgency": _safe(lambda: target.getInsurgency(), 6),
+        "stability": _safe(lambda: target.getInsurgency(), 6),  # compatibility alias
         "government_strength": int(getattr(target, "govtStrength", 0)),
         "insurgent_strength": int(getattr(target, "insgStrength", 0)),
         "our_influence": _safe(lambda: influence(me, target), 0),
@@ -395,33 +440,43 @@ def my_policy(world, side, country):
     side = int(side)
     me = world.country[side]
     cid = int(target.id)
-    standing = int(me.diplOpinion[cid])
     policy = {
         "ok": True,
         "country": country_name(world, target),
         "id": cid,
-        # Levels are 0-5 steps.  Economic aid, destabilization, treaty,
-        # pressure and trade belong to the superpower; the rest are held on the
-        # country object, which is where the importance function reads them.
-        "economic_aid": int(me.econAid[cid]),
-        "destabilization": int(me.destab[cid]),
-        "treaty": int(me.treaty[cid]),
-        "pressure": int(me.pressure[cid]),
-        "trade": int(me.trade[cid]),
-        "military_aid": int(me.govtAid[cid]),
-        "insurgent_aid": int(me.insgAid[cid]),
-        "government_intervention": int(me.govtIntv[cid]),
-        "insurgent_intervention": int(me.insgIntv[cid]),
-        "ceiling_treaty": _safe(lambda: treatyMax(world.level, standing + 2 * me.pugnacity
-                                                  + me.integrity), None),
-        "ceiling_economic_aid": _safe(lambda: econAidMax(standing), None),
-        "ceiling_military_aid": _safe(lambda: govtAidMax(standing), None),
-        "ceiling_government_intervention": _safe(
-            lambda: intvGovtMax(world.level, me.treaty[cid], standing), None),
-        "ceiling_insurgent_aid": _safe(lambda: insgAidMax(world, me, target), None),
-        "ceiling_insurgent_intervention": _safe(
-            lambda: intvInsgMax(world, me, target), None),
+        "rules": {},
+        "legal_choices": {},
     }
+    names = ("destabilization", "economic_aid", "military_aid", "insurgent_aid",
+             "government_intervention", "insurgent_intervention", "pressure",
+             "treaty", "trade")
+    unlocked = AVL_ACTIONS[max(0, min(int(world.level), len(AVL_ACTIONS)) - 1)]
+    for verb, name in enumerate(names):
+        info = policy_info(world, me, verb, target)
+        available = cid >= 2 and verb in unlocked
+        steps = list(info.steps()) if available else []
+        unit = ("thousand troops" if verb in (4, 5) else
+                "military aid budget units" if verb in (2, 3) else
+                "economic aid budget units" if verb == 1 else None)
+        policy[name] = int(info.old)
+        policy["ceiling_" + name] = int(info.ceiling)
+        policy["legal_choices"][name] = steps
+        policy["rules"][name] = {
+            "verb": verb, "current": int(info.old), "ceiling": int(info.ceiling),
+            "floor": int(info.floor), "available": bool(available),
+            "legal_steps": steps,
+            "resource_available": int(info.avail) if info.avail is not None else None,
+            "resource_unit": unit,
+            "limits": [{"ceiling": int(value), "reason": str(reason)}
+                       for value, reason in info.limits],
+            "reason": ("Not available at this difficulty." if verb not in unlocked else
+                       "Policies can only target a minor country." if cid < 2 else info.reason),
+        }
+    policy["available_military_aid"] = int(me.getAvailableAid())
+    policy["available_troops_thousands"] = int(me.getAvailableMen())
+    policy["available_economic_aid"] = policy["rules"]["economic_aid"]["resource_available"]
+    # Keep these coarse legacy budget fields for consumers that display them.
+    # Actual per-country legality is exclusively the policy_info result above.
     ceilings = maxPolicy(me)
     policy["uncommitted_military_aid_step"] = int(ceilings[1])
     policy["uncommitted_intervention_step"] = int(ceilings[0])
@@ -429,26 +484,75 @@ def my_policy(world, side, country):
     return policy
 
 
+_POLICY_LABELS_RU = ("дестабилизация", "экономическая помощь", "военная помощь", "помощь повстанцам",
+                     "войска на стороне правительства", "войска на стороне повстанцев", "давление", "договор", "торговля")
+_POLICY_STEPS_RU = {
+    0: ("нет активности", "помощь диссидентам", "финансирование оппозиции", "разжигание беспорядков", "убийства", "поддержка переворота"),
+    6: ("нет", "тихая дипломатия", "публичные заявления", "умеренное давление", "сильное давление", "дипломатическое наступление"),
+    7: ("нет отношений", "дипломатические отношения", "торговые отношения", "военные базы", "обычная оборона", "ядерная оборона"),
+    8: ("нет торговли", "торговые переговоры", "ограниченная торговля", "торговое соглашение", "льготная торговля", "полное торговое партнёрство"),
+}
+_INSURGENCY_RU = ("гражданская война", "крупная партизанская война", "малая партизанская война",
+                  "массовый терроризм", "ограниченный терроризм", "слабые волнения", "мирная обстановка")
+
+
+def policy_value(verb, step, language="en"):
+    """A selectable policy amount/caption, using the core's exact conversions."""
+    if verb in (1, 2, 3):
+        amount = econConv(step) * 200 if verb == 1 else mAidConv(step) * 20
+        return _money(amount, language)
+    if verb in (4, 5):
+        amount = format(intvConv(step) * 1000, ",")
+        return amount.replace(",", " ") + " военнослужащих" if language == "ru" else amount + " troops"
+    return _POLICY_STEPS_RU[verb][step] if language == "ru" else Local.parseValue(UNIT_MODES[verb], step)
+
+
+def _money(millions, language):
+    amount = format(millions, ",")
+    return (amount.replace(",", " ") + " млн долларов в год" if language == "ru"
+            else amount + " million USD/year")
+
+
+def _policy_choices(policy, language):
+    return "; ".join("%s: %s" % (
+        _POLICY_LABELS_RU[rule["verb"]] if language == "ru" else name.replace("_", " "),
+        ", ".join(policy_value(rule["verb"], step, language) for step in rule["legal_steps"]))
+        for name, rule in policy["rules"].items() if rule["available"])
+
+
+def _budget_text(policy, language):
+    verbs = {rule["verb"] for rule in policy["rules"].values() if rule["available"]}
+    parts = []
+    if 1 in verbs:
+        parts.append(("экономическая помощь: " if language == "ru" else "economic aid: ")
+                     + _money(policy["available_economic_aid"] * 100, language))
+    if verbs.intersection((2, 3)):
+        # Available aid is twice the mAidConv budget, hence $10m per unit.
+        # Step cost is mAidConv(step)*2 units = mAidConv(step)*$20m.
+        parts.append(("военная помощь: " if language == "ru" else "military aid: ")
+                     + _money(policy["available_military_aid"] * 10, language))
+    if verbs.intersection((4, 5)):
+        amount = format(policy["available_troops_thousands"] * 1000, ",")
+        parts.append("войска: " + amount.replace(",", " ") + " военнослужащих" if language == "ru"
+                     else "troops: " + amount + " personnel")
+    if not parts:
+        return ""
+    return ("Свободные ресурсы — " if language == "ru" else "Free resources — ") + "; ".join(parts) + "."
+
+
 def _policy_summary(policy):
-    """One line of levels and ceilings, for the prompt and for the log."""
-    parts = ["treaty %d/%s" % (policy["treaty"], _ceiling(policy["ceiling_treaty"])),
-             "trade %d/%s" % (policy["trade"], _ceiling(policy["ceiling_treaty"])),
-             "economic aid %d/%s" % (policy["economic_aid"],
-                                     _ceiling(policy["ceiling_economic_aid"])),
-             "military aid %d/%s" % (policy["military_aid"],
-                                     _ceiling(policy["ceiling_military_aid"])),
-             "government intervention %d/%s"
-             % (policy["government_intervention"],
-                _ceiling(policy["ceiling_government_intervention"])),
-             "insurgent aid %d/%s" % (policy["insurgent_aid"],
-                                      _ceiling(policy["ceiling_insurgent_aid"])),
-             "destabilization %d" % policy["destabilization"],
-             "pressure %d" % policy["pressure"]]
-    return ", ".join(parts)
+    """Visible policies, with actual amounts instead of internal step indices."""
+    parts = ["%s %s / %s" % (name.replace("_", " "), policy_value(rule["verb"], rule["current"]),
+                             policy_value(rule["verb"], rule["ceiling"]))
+             for name, rule in policy["rules"].items() if rule["available"]]
+    if not parts:
+        return "Policies can only target minor countries."
+    return ("current / raise ceiling (held levels may still be kept): " + "; ".join(parts)
+            + "; legal choices: " + _policy_choices(policy, "en") + ". " + _budget_text(policy, "en"))
 
 
-def _ceiling(value):
-    return "?" if value is None else str(value)
+def _insurgency_text(value, language="en"):
+    return _INSURGENCY_RU[value] if language == "ru" else Local.strings[Local.TAG_INSURGENCY][value]
 
 
 def _safe(call, default):
@@ -477,13 +581,16 @@ def facts_block(world, side, question="", countries=None):
         facts = country_facts(world, side, cid)
         if not facts.get("ok"):
             continue
-        lines.append("%s (worth %d): our standing %+d, theirs %+d, stability "
-                     "%d/6 (0 = civil war, 6 = peaceful), sphere %+d, government strength %d against insurgents %d"
-                     % (facts["country"], facts["worth"], facts["our_standing"],
-                        facts["their_standing"], facts["stability"], facts["sphere"],
+        lines.append("%s (displayed prestige weight %d): country's opinion of us %+d, of our rival %+d, insurgency: "
+                     "%s, sphere %+d, government strength %d against insurgents %d"
+                     % (facts["country"], facts["prestige_value"], facts["our_standing"],
+                        facts["their_standing"], _insurgency_text(facts["insurgency"]), facts["sphere"],
                         facts["government_strength"], facts["insurgent_strength"]))
         detail = ["our influence %d, theirs %d"
                   % (facts["our_influence"], facts["their_influence"]),
+                  "our opinion of this country %+d, our rival's opinion of it %+d "
+                  "(this outgoing direction is used by policy acceptance rules)"
+                  % (facts["our_opinion_of_country"], facts["their_opinion_of_country"]),
                   "leader %s" % facts["leader"]]
         if "relations" in facts:
             detail.append("relations between the superpowers %+d" % facts["relations"])
@@ -510,19 +617,29 @@ def country_phrase(world, country):
 def situation_text(world, side, headline=None, extra_question=None,
                    memory=None, facts=None):
     """A short, factual brief of the board as this side sees it."""
+    from GameLogic.MovePlanner import estimate_error
     me = world.country[side]
     them = world.country[1 - side]
     lines = []
     lines.append("SITUATION")
-    lines.append("It is %d. World tension is %d out of 127."
-                 % (world.year, world.nastiness))
+    known = getattr(world, "knownNastiness", None)
+    intel = getattr(world, "intel", (0, 0))
+    error = estimate_error(intel[side])
+    if known is not None and len(known) > side:
+        belief = int(known[side])
+        lines.append("It is %d. Intelligence estimates world tension at %d out of 127 "
+                     "with uncertainty +/- %d (range %d to %d). This is an estimate, "
+                     "not the hidden true value."
+                     % (world.year, belief, error, max(0, belief - error), min(127, belief + error)))
+    else:
+        lines.append("It is %d. Intelligence has no current estimate of world tension." % world.year)
     lines.append("Relations between the superpowers: %d "
                  "(-127 hostile, +127 friendly)." % world.USA.diplOpinion[1])
     lines.append("Your score so far: %d. The other side's: %d."
                  % (me.score - me.initScore, them.score - them.initScore))
-    budget = maxPolicy(me)
-    lines.append("Your uncommitted aid budget step %d/5, troops step %d/5, "
-                 "treaty credibility %d/127." % (budget[1], budget[0], me.integrity))
+    lines.append(_budget_text(my_policy(world, side, 2), "en"))
+    if world.level >= 3:
+        lines.append("Treaty credibility %d/127." % me.integrity)
     if headline is not None:
         lines.append("")
         lines.append("THE QUESTION ON THE TABLE")
@@ -542,10 +659,10 @@ def situation_text(world, side, headline=None, extra_question=None,
     lines.append("COUNTRIES THAT MATTER MOST RIGHT NOW")
     ranked = sorted(world.country[2:], key=lambda c: -c.prestigeVal)[:BRIEFING_COUNTRIES]
     for country in ranked:
-        lines.append("- %s: worth %d, your standing %d, theirs %d, stability %d/6 (0 = civil war, 6 = peaceful)."
-                     % (country_name(world, country), country.prestigeVal // 64,
-                        me.diplOpinion[country.id], them.diplOpinion[country.id],
-                        country.getInsurgency()))
+        lines.append("- %s: displayed prestige weight %d, country's opinion of you %d, of your rival %d, insurgency: %s."
+                     % (country_name(world, country), country.prestigeVal // 8,
+                        country.diplOpinion[side], country.diplOpinion[1 - side],
+                        _insurgency_text(country.getInsurgency())))
     return "\n".join(lines)
 
 
@@ -669,6 +786,7 @@ class AdvisorSession(object):
         self._quiet = False
         self.last_prediction = None
         self.world = None
+        self.language = "en"
 
     @property
     def offline(self):
@@ -686,7 +804,7 @@ class AdvisorSession(object):
         self.last_error = ""
         self.last_prediction = None
 
-    def system_prompt(self, world):
+    def system_prompt(self, world, language=None):
         """The brief that makes the model this advisor rather than a chatbot.
 
         Built from the roster's structured fields - post, beliefs, manner of
@@ -696,12 +814,20 @@ class AdvisorSession(object):
         Casey to Reagan is the kind of detail that breaks the illusion.
         """
         me = world.country[self.side]
-        return SYSTEM_TEMPLATE.format(
+        prompt = SYSTEM_TEMPLATE.format(
             character=self.advisor.prompt_block(),
             country=country_phrase(world, me),
             leader="%s %s" % (LEADER_TITLE.get(self.side, "the leader"), me.name),
             year=world.year,
             perspective=PERSPECTIVE.get(self.advisor.bias, ""))
+        selected = language or self.language
+        instruction = ("Write ALL spoken advice in Russian, even when the facts, "
+                       "country names or earlier messages are in English. Translate "
+                       "country names naturally in the prose."
+                       if selected == "ru" else "Write ALL spoken advice in English.")
+        return prompt + "\nOUTPUT LANGUAGE\n" + instruction + (
+            " Keep the machine markers FACTS and PREDICTION in English, and use "
+            "the country spelling from the supplied facts in those machine lines.")
 
     # -- the advisor's tools (E4) -------------------------------------------
 
@@ -729,8 +855,12 @@ class AdvisorSession(object):
 
     # -- asking -------------------------------------------------------------
 
-    def ask(self, world, question, headline=None):
-        """Return the advisor's reply.  Never raises."""
+    def ask(self, world, question, headline=None, language=None):
+        """Return advice; optional en/ru controls speech, not machine markers."""
+        if language is not None:
+            if language not in ("en", "ru"):
+                raise ValueError("advisor language must be en or ru")
+            self.language = language
         self.world = world
         try:
             self.memory.observe(world, self.side)
@@ -773,8 +903,11 @@ class AdvisorSession(object):
             elif self.last_error and not self._quiet:
                 note = ("I cannot reach my staff just now, so this is my own "
                         "reading of the file: ")
+            if self.language == "ru" and note:
+                note = "Модель недоступна; приведу факты и допустимые действия по правилам игры. "
             return note + self._offline_answer(world, question, headline, mentioned)
         reply = reply.strip()
+        history_start = len(self.history)
         self.history.append({"role": "user", "content": question})
         self.history.append({"role": "assistant", "content": reply})
         wanted = requested_facts(reply)
@@ -791,6 +924,11 @@ class AdvisorSession(object):
                 if second:
                     reply = second.strip()
                     self.history.append({"role": "assistant", "content": reply})
+        if self.language == "ru" and not re.search(r"[А-Яа-яЁё]", clean_reply(reply)):
+            self.last_error = "the advisor model did not answer in Russian"
+            del self.history[history_start:]
+            return ("Модель не ответила по-русски; приведу факты по правилам игры. "
+                    + self._offline_answer(world, question, headline, mentioned))
         return reply
 
     def _call(self, messages):
@@ -832,6 +970,8 @@ class AdvisorSession(object):
 
     def _offline_answer(self, world, question, headline, mentioned=None):
         """A rules-consistent answer assembled without a model."""
+        if self.language == "ru":
+            return self._russian_offline_answer(world, question, mentioned)
         me = world.country[self.side]
         them = world.country[1 - self.side]
         opening = {
@@ -847,7 +987,7 @@ class AdvisorSession(object):
         # A question about a country is answered about that country, from the
         # same lookup the model would have been given.
         targets = list(mentioned) if mentioned else self._default_countries(world)
-        for cid in targets[:3]:
+        for index, cid in enumerate(targets[:3]):
             facts = country_facts(world, self.side, cid)
             if not facts.get("ok"):
                 continue
@@ -856,10 +996,17 @@ class AdvisorSession(object):
                     "leaning our way" if stance > 10 else
                     "against us" if stance < -40 else
                     "contested")
-            body.append("%s is %s: our standing %+d against their %+d, stability "
-                        "%d/6 (0 is civil war, 6 is peaceful), and it is worth %d."
+            body.append("%s is %s: our standing %+d against their %+d, insurgency: "
+                        "%s, and its displayed prestige weight is %d."
                         % (facts["country"], tilt, facts["our_standing"],
-                           facts["their_standing"], facts["stability"], facts["worth"]))
+                           facts["their_standing"], _insurgency_text(facts["insurgency"]), facts["prestige_value"]))
+            if index == 0:
+                policy = my_policy(world, self.side, cid)
+                choices = _policy_choices(policy, "en")
+                body.append("Legal choices: " + choices + "." if choices else "Policies can only target minor countries.")
+                resources = _budget_text(policy, "en")
+                if resources:
+                    body.append(resources)
         behind = (me.score - me.initScore) - (them.score - them.initScore)
         if behind > 25:
             body.append("We are ahead; there is no reason to gamble.")
@@ -886,6 +1033,31 @@ class AdvisorSession(object):
         return ("%s %s %s\n%s" % (opening, " ".join(body), advice,
                                   prediction_line(prediction))).strip()
 
+    def _russian_offline_answer(self, world, question, mentioned=None):
+        """A compact factual Russian fallback, with no invented legal moves."""
+        targets = list(mentioned) if mentioned else self._default_countries(world)
+        lines = ["Сужу по текущим данным симуляции."]
+        for cid in targets[:1]:
+            facts = country_facts(world, self.side, cid)
+            policy = my_policy(world, self.side, cid)
+            if not facts.get("ok") or not policy.get("ok"):
+                continue
+            name = _russian_country_name(world, cid)
+            lines.append("%s: отношение к нам %+d, к сопернику %+d; повстанческая активность: %s; отображаемый вес в престиже: %d. "
+                         "Наше отношение к этой стране %+d: именно это направление "
+                         "учитывают правила доступности политики."
+                         % (name, facts["our_standing"], facts["their_standing"],
+                            _insurgency_text(facts["insurgency"], "ru"), facts["prestige_value"], facts["our_opinion_of_country"]))
+            choices = _policy_choices(policy, "ru")
+            lines.append("Допустимые уровни: %s." % choices
+                         if choices else "Политику можно задавать только в отношении малых стран.")
+            resources = _budget_text(policy, "ru")
+            if resources:
+                lines.append(resources)
+            lines.append("Оценивайте выгоду только среди допустимых уровней.")
+        prediction = offline_prediction(world, self.side, self.advisor, question, mentioned or ())
+        return " ".join(lines) + "\n" + prediction_line(prediction)
+
     def _default_countries(self, world):
         """The three countries worth talking about when nothing was named."""
         ranked = sorted(world.country[2:], key=lambda c: -c.prestigeVal)[:3]
@@ -898,6 +1070,15 @@ class AdvisorSession(object):
         if not self.last_prediction:
             return ""
         stats = self.memory.stats(self.side, self.advisor.key)
+        if self.language == "ru":
+            prediction = self.last_prediction
+            movement = {UP: "сблизится с нами", HOLD: "сохранит положение",
+                        DOWN: "отдалится от нас"}
+            name = _russian_country_name(self.world, prediction["country_id"])
+            return ("Прогноз: %s %s; уверенность %d%%. Проверено: %d, верных: %d, "
+                    "ожидают проверки: %d."
+                    % (name, movement.get(prediction["direction"], "сохранит положение"),
+                       prediction["confidence"], stats["resolved"], stats["hits"], stats["open"]))
         if stats["resolved"]:
             record = "%d of %d right" % (stats["hits"], stats["resolved"])
             if stats["open"]:

@@ -945,7 +945,7 @@ class LLMClient(object):
                     asked = parse_retry_after(exc.headers.get("Retry-After")
                                               if exc.headers else None)
                     wait = (asked if asked is not None
-                            else 0.8 * (2 ** attempt) + random.random() * 0.3)
+                            else 0.8 * (2 ** attempt) + random.SystemRandom().random() * 0.3)
                     if asked is not None and asked > deadline - time.monotonic() - 0.5:
                         # The service says to wait longer than this call may
                         # take.  Retrying early only earns another refusal.

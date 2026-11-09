@@ -63,6 +63,7 @@ MIN_SAMPLE = 3
 
 #: Direction words as the model (and the offline path) writes them.
 UP, HOLD, DOWN = 1, 0, -1
+ALIGNMENT_BASIS = "country_opinion_of_superpower"
 
 
 def alignment(world, side, country_id):
@@ -72,7 +73,7 @@ def alignment(world, side, country_id):
     country on" (``diplOpinion``), and it is what a prediction about the
     direction of a country's alignment is scored against.
     """
-    return int(world.country[int(side)].diplOpinion[int(country_id)])
+    return int(world.country[int(country_id)].diplOpinion[int(side)])
 
 
 def game_key(world):
@@ -161,8 +162,12 @@ class AdvisorMemory(object):
             value = block.get(name)
             if isinstance(value, list):
                 setattr(self, name, [item for item in value if isinstance(item, dict)])
+        # Older releases stored the opposite direction of the opinion matrix.
+        # Those pending baselines cannot be scored fairly after the correction;
+        # retain the historical records, but discard incompatible open bets.
+        self.pending = [p for p in self.pending if p.get("alignment_basis") == ALIGNMENT_BASIS]
         snapshot = block.get("snapshot")
-        if isinstance(snapshot, dict):
+        if isinstance(snapshot, dict) and snapshot.get("alignment_basis") == ALIGNMENT_BASIS:
             self.snapshot = snapshot
 
     def save(self):
@@ -303,10 +308,9 @@ class AdvisorMemory(object):
         if victim is None and head is not None:
             victim = getattr(head, "target", None)
         align = {}
-        me = world.country[side]
         for country in world.country[2:]:
             try:
-                align[str(country.id)] = int(me.diplOpinion[country.id])
+                align[str(country.id)] = int(country.diplOpinion[side])
             except (AttributeError, IndexError, TypeError):
                 continue
         crisis_country = ""
@@ -325,6 +329,7 @@ class AdvisorMemory(object):
             "crisis_backdown": bool(getattr(crisis, "backDown", False)),
             "crisis_country": crisis_country,
             "align": align,
+            "alignment_basis": ALIGNMENT_BASIS,
             "fired": [str(key) for key in (getattr(world, "firedEvents", None) or ())],
         }
 
@@ -477,6 +482,7 @@ class AdvisorMemory(object):
             "direction": self._as_int(direction),
             "confidence": max(0, min(100, self._as_int(confidence, 50))),
             "alignment": alignment(world, side, country_id),
+            "alignment_basis": ALIGNMENT_BASIS,
             "question": str(question)[:200],
         }
         self.pending.append(prediction)

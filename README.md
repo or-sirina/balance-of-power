@@ -2,6 +2,13 @@
 
 **[Описание на русском — README.ru.md](README.ru.md)**
 
+**Godot desktop prototype:** the new engine presents the original Python
+simulation with English/Russian UI, 60 map modes, country history, scores,
+objectives, contextual AI advisors and an isolated learning course. Start with
+`python3 tools/run_godot.py --language en`. See the [prototype guide](docs/ENGINE_PROTOTYPE.md)
+for standalone builds, AI configuration and current scope. The Qt application
+below remains available, including multiplayer.
+
 A turn-based simulation of the Cold War, 1982 to 1990. You play one of the two
 superpowers; the other is played by the computer or by a second person. There is
 no territory to take: you spend money, weapons, troops and treaties on the 78
