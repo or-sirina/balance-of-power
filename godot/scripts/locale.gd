@@ -6,6 +6,14 @@ const RU_COUNTRIES = ["США", "СССР", "Мексика", "Гондурас"
 const POLICIES_EN = ["Destabilization", "Economic aid", "Military aid", "Aid to insurgents", "Government intervention", "Rebel intervention", "Diplomatic pressure", "Treaty", "Trade"]
 const POLICIES_RU = ["Дестабилизация", "Экономическая помощь", "Военная помощь", "Помощь повстанцам", "Войска на стороне власти", "Войска на стороне повстанцев", "Дипломатическое давление", "Договор", "Торговля"]
 const STRINGS = {
+ "map_overview": ["World", "Мир"], "map_policies": ["Influence & policies", "Влияние и политика"], "map_indicators": ["Country indicators", "Показатели стран"],
+ "menu": ["Menu", "Меню"], "advisor_short": ["Advisors", "Советники"], "country_short": ["Country", "Страна"],
+ "settings": ["Settings", "Настройки"], "help": ["How to play", "Как играть"], "quit": ["Quit", "Выйти"],
+ "multiplayer": ["Multiplayer", "Игра вдвоём"], "volume": ["Music volume", "Громкость музыки"],
+ "colorblind": ["Distinct map colours", "Контрастные цвета карты"], "sfx": ["Sound effects", "Звуковые эффекты"],
+ "menu_brief": ["Keep the balance. Every commitment has a consequence.", "Удержите равновесие. У каждого решения есть последствия."],
+ "menu_hint": ["Lead a superpower through the Cold War. Influence countries, manage crises and protect your prestige. Nuclear war means everyone loses.", "Возглавьте сверхдержаву в годы холодной войны. Боритесь за влияние, разрешайте кризисы и берегите престиж. Ядерная война означает поражение обеих сторон."],
+ "help_body": ["Select a country on the map to review its position and choose a policy. Use the map indicators to compare influence and commitments. End the year when your decisions are ready. Dispatches reveal events and moves you can challenge. In a crisis, standing firm increases the danger; backing down costs prestige. Advisors explain the situation. The learning course lets you practise and return to your campaign.", "Выберите страну на карте, изучите её положение и измените политику. Показатели карты помогают сравнить влияние и обязательства. Когда решения приняты, завершите год. В донесениях появляются события и действия, которые можно оспорить. В кризисе твёрдая позиция повышает опасность, а отступление стоит престижа. Советники объяснят обстановку. Учебный курс позволяет потренироваться и вернуться в кампанию."],
  "title": ["Balance of Power", "Баланс сил"],
  "scores": ["Scores", "Счёт"], "objectives": ["Objectives", "Обязательства"],
  "ai_settings": ["AI settings", "Настройки ИИ"],

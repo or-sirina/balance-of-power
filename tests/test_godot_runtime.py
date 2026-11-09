@@ -31,6 +31,7 @@ class BaseHarness extends Main:
  func _update_guide() -> void: pass
  func _advance_guide(_command: String, _response: Dictionary) -> void: pass
  func _save_preferences() -> void: pass
+ func _show_game() -> void: game_visible = true
 class CapturedHarness extends BaseHarness:
  var captured: Array = []
  func _command(command: String, args: Dictionary = {}, after: Callable = Callable(), advisory: bool = false) -> void:
@@ -76,7 +77,11 @@ class LocalTransport:
                 failed = request["command"] == "transport_error"
                 body = json.dumps({"ok": not failed, "revision": 7,
                                    "state": {"side": 0, "year": 1982, "level": 3, "opponent": "model",
-                                             "crisis": {"active": True}, "ended": False}}).encode()
+                                             "crisis": {"active": True, "level": 8, "headline": "A policy is contested.",
+                                                        "reaction": "Built-in response."}, "ended": False}}).encode()
+                if request["command"] == "world_closed":
+                    body = json.dumps({"ok": True, "revision": 8, "state": None,
+                                       "multiplayer": {"active": False}}).encode()
                 self.send_response(503 if failed else 200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -206,6 +211,22 @@ func run() -> void:
    if failed.finished: break
    await process_frame
   assert(failed.finished and host.end_button.disabled)
+ # A successful campaign must open even when its language-specific callback
+ # has become obsolete while waiting for the backend.
+ var callback_seen := {"called": false}
+ host._command("new_game", {}, func(_result): callback_seen.called = true)
+ Locale.language = "ru"
+ for _i in range(240):
+  if host.game_visible: break
+  await process_frame
+ assert(host.game_visible and not callback_seen.called)
+ # Leaving a network session or an unbacked tutorial returns a null world.
+ var closed := {"finished": false}
+ host._command("world_closed", {}, func(result): closed.finished = result.get("ok", false))
+ for _i in range(240):
+  if closed.finished: break
+  await process_frame
+ assert(closed.finished and host.state.is_empty() and host.revision == 8)
  # A synchronous request() error must still release its dialog callback.
  host.backend_url = "ftp://127.0.0.1"
  var immediate := {"finished": false}
@@ -221,7 +242,7 @@ func run() -> void:
 ''' % json.dumps(server.url))
         finally:
             server.close()
-        self.assertEqual(server.calls, ["report", "transport_error", "transport_error"])
+        self.assertEqual(server.calls, ["report", "transport_error", "transport_error", "new_game", "world_closed"])
 
     def test_advisor_panel_restores_campaign_and_rejects_old_voice_or_window_replies(self):
         self.run_godot('''

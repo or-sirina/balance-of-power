@@ -3,15 +3,30 @@ extends Control
 signal advisor_answered(response: Dictionary)
 signal crisis_briefing_ready(result: Dictionary)
 signal map_report_ready(mode: int)
+signal network_changed(network: Dictionary)
 
 const L = preload("res://scripts/locale.gd")
 const WorldMap = preload("res://scripts/world_map.gd")
 const Reports = preload("res://scripts/reports.gd")
 const AISettings = preload("res://scripts/ai_settings.gd")
 const AdvisorPanel = preload("res://scripts/advisor_panel.gd")
+const SoundSignals = preload("res://scripts/sound_signals.gd")
 const INK = Color("152f40")
 const PAPER = Color("e7eadf")
 const MUTED = Color("9bb2bf")
+var start_screen: PanelContainer
+var menu_status_label: Label
+var country_drawer: PanelContainer
+var news_drawer: PanelContainer
+var guide_panel: PanelContainer
+var game_visible := false
+var colorblind := false
+var sfx_enabled := true
+var relief_enabled := false
+var sound_signals: Node
+var network_state: Dictionary = {}
+var network_poll_pending := false
+var undo_button: Button
 var backend_url := ""
 var token := ""
 var revision := 0
@@ -20,6 +35,7 @@ var state: Dictionary = {}
 var busy := false
 var ui: VBoxContainer
 var map_view: Control
+var map_group_picker: OptionButton
 var map_picker: OptionButton
 var map_source_label: Label
 var map_legend: HFlowContainer
@@ -90,13 +106,24 @@ func _ready() -> void:
  audio_player.volume_db = volume
  audio_player.finished.connect(_next_track)
  add_child(audio_player)
+ sound_signals = SoundSignals.new()
+ add_child(sound_signals)
  _build_ui()
  if backend_url.is_empty():
-  status_label.text = L.text("connection_error")
+  _set_status(L.text("connection_error"))
   if smoke_test:
    get_tree().quit(1)
   return
- _command("new_game", {"side": 0, "level": 3, "seed": 1982})
+ var network_timer := Timer.new()
+ network_timer.wait_time = 1.0
+ network_timer.timeout.connect(_poll_multiplayer)
+ add_child(network_timer)
+ network_timer.start()
+ if smoke_test:
+  await get_tree().process_frame
+  await _snapshot_screen("start")
+  start_screen.find_child("NewGameButton", true, false).pressed.emit()
+  popup.find_child("StartCampaignButton", true, false).pressed.emit()
  if smoke_test:
   get_tree().create_timer(60).timeout.connect(func(): push_error("Godot smoke timed out"); get_tree().quit(1))
 
@@ -109,6 +136,10 @@ func _load_preferences() -> void:
   reduced_motion = config.get_value("ui", "reduced_motion", false)
   music_enabled = config.get_value("audio", "enabled", false)
   volume = config.get_value("audio", "volume", -20.0)
+  track_index = config.get_value("audio", "track", 0)
+  colorblind = config.get_value("ui", "colorblind", false)
+  sfx_enabled = config.get_value("audio", "sfx", true)
+  relief_enabled = config.get_value("ui", "relief", false)
 
 func _save_preferences() -> void:
  if smoke_test:
@@ -118,6 +149,10 @@ func _save_preferences() -> void:
  config.set_value("ui", "reduced_motion", reduced_motion)
  config.set_value("audio", "enabled", music_enabled)
  config.set_value("audio", "volume", volume)
+ config.set_value("audio", "track", track_index)
+ config.set_value("audio", "sfx", sfx_enabled)
+ config.set_value("ui", "colorblind", colorblind)
+ config.set_value("ui", "relief", relief_enabled)
  config.save("user://presentation.cfg")
 
 func _style(color: Color, radius: int = 4) -> StyleBoxFlat:
@@ -180,64 +215,37 @@ func _clear(container: Node) -> void:
   child.queue_free()
 
 func _build_ui() -> void:
+ for overlay in [country_drawer, news_drawer, guide_panel, start_screen]:
+  if is_instance_valid(overlay):
+   remove_child(overlay)
+   overlay.queue_free()
+ country_drawer = null
+ news_drawer = null
+ guide_panel = null
+ start_screen = null
  if is_instance_valid(ui):
   remove_child(ui)
   ui.queue_free()
  theme = _theme()
  ui = VBoxContainer.new()
  ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
- ui.offset_left = 22
- ui.offset_right = -22
- ui.offset_top = 18
+ ui.offset_left = 12
+ ui.offset_right = -12
+ ui.offset_top = 10
  ui.offset_bottom = -14
- ui.add_theme_constant_override("separation", 12)
+ ui.add_theme_constant_override("separation", 6)
  add_child(ui)
  var header := HBoxContainer.new()
- var title_box := VBoxContainer.new()
- title_box.add_theme_constant_override("separation", 0)
- title_box.add_child(_label(L.text("title"), 29))
- title_box.add_child(_label(L.text("subtitle"), 14, MUTED))
- header.add_child(_expand(title_box))
- year_label = _label("1982", 36, Color("eddaa8"))
+ header.add_child(_button(L.text("menu"), _show_start_menu))
+ year_label = _label("1982", 24, Color("eddaa8"))
  header.add_child(year_label)
- score_label = _label("", 15, PAPER)
- score_label.custom_minimum_size.x = 280
- header.add_child(score_label)
+ score_label = _label("", 13, PAPER)
+ header.add_child(_expand(score_label))
+ header.add_child(_button("Сведения" if L.language == "ru" else "Reports", _open_reports))
+ header.add_child(_button(L.text("advisor_short"), _advisor_dialog))
+ end_button = _button(L.text("end"), func(): _command("end_turn"))
+ header.add_child(end_button)
  ui.add_child(header)
- var toolbar := HFlowContainer.new()
- toolbar.add_theme_constant_override("h_separation", 8)
- toolbar.add_theme_constant_override("v_separation", 6)
- toolbar.add_child(_button(L.text("new"), _new_game_dialog))
- toolbar.add_child(_button(L.text("save"), func(): _command("save")))
- toolbar.add_child(_button(L.text("load"), func(): _command("load")))
- toolbar.add_child(_button(L.text("learn"), _toggle_guide))
- toolbar.add_child(_button(L.text("intelligence"), _intelligence_dialog))
- toolbar.add_child(_button(L.text("scores"), func(): Reports.show_report(self, "scores")))
- toolbar.add_child(_button(L.text("objectives"), func(): Reports.show_report(self, "objectives")))
- toolbar.add_child(_button(L.text("ai_settings"), _open_ai_settings))
- toolbar.add_child(_expand(Control.new()))
- var music_toggle := CheckButton.new()
- music_toggle.text = L.text("music")
- music_toggle.button_pressed = music_enabled
- music_toggle.toggled.connect(func(enabled): music_enabled = enabled; _play_music(); _save_preferences())
- toolbar.add_child(music_toggle)
- var volume_slider := HSlider.new()
- volume_slider.custom_minimum_size.x = 80
- volume_slider.min_value = -40
- volume_slider.max_value = 0
- volume_slider.value = volume
- volume_slider.tooltip_text = L.text("music")
- volume_slider.value_changed.connect(func(value): volume = value; audio_player.volume_db = value; _save_preferences())
- toolbar.add_child(volume_slider)
- toolbar.add_child(_button("▶|", _next_track))
- var motion_toggle := CheckButton.new()
- motion_toggle.text = L.text("motion")
- motion_toggle.button_pressed = reduced_motion
- motion_toggle.toggled.connect(func(enabled): reduced_motion = enabled; map_view.reduced_motion = enabled; _save_preferences())
- toolbar.add_child(motion_toggle)
- toolbar.add_child(_button("Русский" if L.language == "en" else "English", _change_language))
- toolbar.add_child(_button(L.text("credits"), _credits))
- ui.add_child(toolbar)
  var body := HBoxContainer.new()
  body.size_flags_vertical = Control.SIZE_EXPAND_FILL
  body.add_theme_constant_override("separation", 18)
@@ -268,11 +276,32 @@ func _build_ui() -> void:
  guide_box.add_child(lesson_row)
  guide_button = _button(L.text("ack"), func(): _command("tutorial_ack"))
  guide_box.add_child(guide_button)
- left.add_child(guide_box)
+ guide_panel = PanelContainer.new()
+ guide_panel.add_theme_stylebox_override("panel", _style(INK))
+ guide_panel.add_child(guide_box)
+ add_child(guide_panel)
+ guide_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+ guide_panel.position = Vector2(24, 110)
+ guide_panel.custom_minimum_size = Vector2(420, 0)
+ guide_panel.size.x = 420
  var map_toolbar := HBoxContainer.new()
+ map_group_picker = OptionButton.new()
+ for key in ["map_overview", "map_policies", "map_indicators"]: map_group_picker.add_item(L.text(key))
+ map_group_picker.select(1)
+ map_group_picker.item_selected.connect(func(_index):
+  _populate_map_modes()
+  for index in range(map_picker.item_count):
+   if not map_picker.is_item_disabled(index):
+    map_picker.select(index)
+    map_mode_id = map_picker.get_item_id(index)
+    map_request_key = ""
+    _request_map_report()
+    break
+ )
+ map_toolbar.add_child(map_group_picker)
  map_picker = OptionButton.new()
  map_picker.fit_to_longest_item = false
- map_picker.custom_minimum_size.x = 240
+ map_picker.custom_minimum_size.x = 200
  map_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  map_picker.add_item(L.text("map_rel"), 17)
  map_picker.add_item(L.text("map_value"), 2)
@@ -283,30 +312,49 @@ func _build_ui() -> void:
  map_toolbar.add_child(map_source_label)
  map_toolbar.add_child(_button(L.text("reset_map"), func(): map_view.fit_map()))
  left.add_child(map_toolbar)
- left.add_child(_label(L.text("map_hint"), 12, MUTED, true))
+ map_toolbar.add_child(_button(L.text("country_short"), func(): _toggle_drawer(country_drawer)))
+ map_toolbar.add_child(_button(L.text("news"), func(): _toggle_drawer(news_drawer)))
  map_view = WorldMap.new()
- map_view.custom_minimum_size = Vector2(500, 270)
+ map_view.relief_enabled = relief_enabled
+ map_view.custom_minimum_size = Vector2(200, 200)
  map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
  map_view.reduced_motion = reduced_motion
+ map_view.set("colorblind", colorblind)
  map_view.country_selected.connect(_select_country)
  left.add_child(map_view)
  map_legend = HFlowContainer.new()
  map_legend.add_theme_constant_override("h_separation", 16)
  left.add_child(map_legend)
- left.add_child(_label(L.text("news"), 19))
+ news_drawer = PanelContainer.new()
+ news_drawer.add_theme_stylebox_override("panel", _style(INK))
+ add_child(news_drawer)
+ news_drawer.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+ news_drawer.offset_left = 24
+ news_drawer.offset_right = -24
+ news_drawer.offset_top = -220
+ news_drawer.offset_bottom = -42
+ news_drawer.visible = false
  news_scroll = ScrollContainer.new()
  news_scroll.custom_minimum_size.y = 155
  news_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
  news_box = VBoxContainer.new()
  news_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  news_scroll.add_child(news_box)
- left.add_child(news_scroll)
- var sidebar := PanelContainer.new()
+ news_drawer.add_child(news_scroll)
+ country_drawer = PanelContainer.new()
+ var sidebar := country_drawer
  sidebar.custom_minimum_size.x = 352
  sidebar.add_theme_stylebox_override("panel", _style(Color("203e4d"), 6))
- body.add_child(sidebar)
+ add_child(sidebar)
+ sidebar.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+ sidebar.offset_left = -350
+ sidebar.offset_right = -12
+ sidebar.offset_top = 104
+ sidebar.offset_bottom = -40
+ sidebar.visible = false
  var side_column := VBoxContainer.new()
  sidebar.add_child(side_column)
+ side_column.add_child(_button(L.text("close"), func(): _toggle_drawer(country_drawer)))
  country_picker = OptionButton.new()
  country_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  for i in range(80):
@@ -333,17 +381,15 @@ func _build_ui() -> void:
  side_column.add_child(crisis_actions)
  side_column.add_child(_button(L.text("advisor"), _advisor_dialog))
  side_column.add_child(_button(L.text("country_report"), func(): Reports.show_report(self, "country")))
- end_button = _button(L.text("end"), func(): _command("end_turn"))
- end_button.custom_minimum_size.y = 46
- end_button.add_theme_stylebox_override("normal", _style(Color("536653")))
- side_column.add_child(end_button)
  status_label = _label(L.text("connect"), 14, MUTED, true)
  ui.add_child(status_label)
  _render_state()
  if not state.is_empty():
-  status_label.text = L.text("ready")
+  _set_status(L.text("ready"))
  _update_guide()
  _play_music()
+ if not game_visible:
+  _show_start_menu()
 
 func _change_language() -> void:
  L.language = "ru" if L.language == "en" else "en"
@@ -363,7 +409,7 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
  if not advisory:
   busy = true
   end_button.disabled = true
-  status_label.text = L.text("working")
+  _set_status(L.text("working"))
  request_counter += 1
  var request := HTTPRequest.new()
  # AI settings allow 300s; the core shares a 1.5x deadline across retries.
@@ -375,8 +421,10 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
  var id := str(request_counter)
  var language_at_request := L.language
  var settings_at_request := settings_generation
+ var revision_at_request := revision
  request.request_completed.connect(func(result, code, _headers, body):
   request.queue_free()
+  if command == "multiplayer_poll": network_poll_pending = false
   if not advisory:
    busy = false
   if advisory and settings_at_request != settings_generation:
@@ -385,24 +433,31 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
    return
   var response = JSON.parse_string(body.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS else null
   if code != 200 or not response is Dictionary:
-   status_label.text = L.text("connection_error")
+   _set_status(L.text("connection_error"))
    _update_end_button()
    if smoke_test: get_tree().quit(1)
    if after.is_valid(): after.call({"ok": false, "error": {"message": L.text("connection_error"), "message_ru": L.text("connection_error")}})
    return
+  if advisory and (int(response.get("revision", -1)) < revision or (revision_at_request != revision and not response.get("ok", false))):
+   if after.is_valid() and language_at_request == L.language: after.call(response)
+   return
+  if int(response.get("revision", -1)) >= revision and response.get("multiplayer") is Dictionary:
+   _receive_network(response.multiplayer)
+  elif int(response.get("revision", -1)) >= revision and response.get("state") is Dictionary and response.state.get("multiplayer") is Dictionary:
+   _receive_network(response.state.multiplayer)
   if not advisory and int(response.get("revision", -1)) >= revision:
    revision = int(response.revision)
-   if response.get("state") is Dictionary:
-    state = response.state
+   if response.has("state"):
+    state = response.state if response.state is Dictionary else {}
    if _crisis_identity() != dialogue_identity:
     dialogue_generation += 1
     dialogue_pending = false
     dialogue_result.clear()
    _render_state()
-  elif advisory and response.get("ok", false) and int(response.get("revision", -1)) >= revision and response.get("state") is Dictionary:
+  elif advisory and response.get("ok", false) and int(response.get("revision", -1)) >= revision and response.has("state"):
    var changed := int(response.revision) > revision
    revision = int(response.revision)
-   state = response.state
+   state = response.state if response.state is Dictionary else {}
    if changed:
     dialogue_generation += 1
     dialogue_pending = false
@@ -412,13 +467,21 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
     _update_guide()
   if not response.get("ok", false):
    var error: Dictionary = response.get("error", {})
-   status_label.text = str(error.get("message_ru" if L.language == "ru" else "message", "Command failed"))
+   _set_status(str(error.get("message_ru" if L.language == "ru" else "message", "Command failed")))
    if smoke_test:
-    push_error(JSON.stringify(error))
+    push_error(command + ": " + JSON.stringify(error))
     get_tree().quit(1)
   else:
-   status_label.text = L.text("saved") if command == "save" else _ready_status()
+   _set_status(L.text("saved") if command == "save" else _ready_status())
+   # Campaign entry is independent of the language used to send the request.
+   # Language-specific panel callbacks below may legitimately be discarded.
+   if not advisory and command in ["new_game", "load", "import_game", "tutorial_start"] and int(response.get("revision", -1)) == revision and not state.is_empty():
+    _show_game()
    _advance_guide(command, response)
+   if command == "tutorial_end" and state.is_empty():
+    guide_enabled = false
+    if is_instance_valid(guide_panel): guide_panel.hide()
+    _show_start_menu()
   if after.is_valid() and language_at_request == L.language:
    after.call(response)
   if smoke_test and not advisory and response.get("ok", false):
@@ -430,16 +493,34 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
  var error := request.request(backend_url + "/command", ["Content-Type: application/json", "Authorization: Bearer " + token], HTTPClient.METHOD_POST, JSON.stringify(payload))
  if error != OK:
   request.queue_free()
+  if command == "multiplayer_poll": network_poll_pending = false
   if not advisory: busy = false
-  status_label.text = L.text("connection_error")
+  _set_status(L.text("connection_error"))
   _update_end_button()
   if after.is_valid(): after.call({"ok": false, "error": {"message": L.text("connection_error"), "message_ru": L.text("connection_error")}})
   if smoke_test: get_tree().quit(1)
 
 func _update_end_button() -> void:
- end_button.disabled = busy or state.is_empty() or state.get("crisis", {}).get("active", false) or state.get("ended", false)
+ end_button.disabled = busy or state.is_empty() or state.get("crisis", {}).get("active", false) or state.get("ended", false) or not _can_act() or network_state.get("duel") is Dictionary
+ end_button.text = ("Передать ход" if L.language == "ru" else "Pass turn") if network_state.get("mode", "") == "hotseat" and network_state.get("ready", []).is_empty() else L.text("end")
+
+func _can_act() -> bool:
+ return not network_state.get("active", false) or bool(network_state.get("can_act", false))
+
+func _receive_network(data: Dictionary) -> void:
+ var changed := JSON.stringify(network_state) != JSON.stringify(data)
+ network_state = data
+ if changed:
+  network_changed.emit(network_state)
+  _render_state.call_deferred()
+
+func _poll_multiplayer() -> void:
+ if not network_state.get("active", false) or network_poll_pending or busy: return
+ network_poll_pending = true
+ _command("multiplayer_poll", {}, func(_result): network_poll_pending = false, true)
 
 func _select_country(country_id: int) -> void:
+ _show_drawer(country_drawer)
  _command("select_country", {"country_id": country_id})
 
 func _open_ai_settings() -> void:
@@ -461,9 +542,16 @@ func _settings_request(command: String, args: Dictionary, callback: Callable) ->
  , true)
 
 func _render_state() -> void:
+ if game_visible and not state.is_empty() and (bool(state.get("crisis", {}).get("active", false)) or network_state.get("duel") is Dictionary) and is_instance_valid(country_drawer):
+  _show_drawer(country_drawer)
  if state.is_empty():
   end_button.disabled = true
+  guide_enabled = false
+  map_request_key = ""
+  map_report.clear()
+  if game_visible: _show_start_menu()
   return
+ if is_instance_valid(sound_signals): sound_signals.observe(state, sfx_enabled, volume, smoke_test)
  var current_year := int(state.year)
  year_label.text = str(current_year)
  if shown_year > 0 and shown_year != current_year and not reduced_motion:
@@ -489,7 +577,7 @@ func _render_state() -> void:
     var button := _button(L.policy(action) + "\n" + L.step(action, int(policy.old)), _policy_dialog.bind(policy))
     button.alignment = HORIZONTAL_ALIGNMENT_LEFT
     button.add_theme_font_size_override("font_size", 14)
-    button.disabled = busy or bool(state.crisis.active) or bool(state.ended)
+    button.disabled = busy or bool(state.crisis.active) or bool(state.ended) or not _can_act() or network_state.get("duel") is Dictionary
     policies_box.add_child(button)
   else:
    policies_box.add_child(_label(L.text("superpower"), 15, MUTED, true))
@@ -504,18 +592,18 @@ func _render_state() -> void:
   var item: Dictionary = news[i]
   var row := HBoxContainer.new()
   row.add_child(_expand(_label(_news_text(item), 14, PAPER, true)))
-  if item.get("questionable", false) and not state.crisis.active and not state.ended:
+  if item.get("questionable", false) and not state.crisis.active and not state.ended and not network_state.get("active", false):
    row.add_child(_button(L.text("challenge"), func(): _command("question", {"news_id": int(item.id)})))
   news_box.add_child(row)
  _render_crisis()
- policies_box.visible = not bool(state.crisis.active)
+ policies_box.visible = not bool(state.crisis.active) and not network_state.get("duel") is Dictionary
  if state.get("tutorial") is Dictionary:
   guide_enabled = state.tutorial.get("active", false)
   guide_step = int(state.tutorial.get("step", 0))
   _update_guide()
- end_button.disabled = busy or state.crisis.active or state.ended
+ _update_end_button()
  if state.ended:
-  status_label.text = L.text("complete")
+  _set_status(L.text("complete"))
   var ending_key := JSON.stringify([state.year, state.scores, state.get("nuclear", false)])
   if ending_key != shown_ending and not smoke_test:
    shown_ending = ending_key
@@ -525,11 +613,24 @@ func _render_state() -> void:
  else:
   shown_ending = ""
 
+func _set_status(message: String) -> void:
+ if is_instance_valid(status_label): status_label.text = message
+ if is_instance_valid(menu_status_label): menu_status_label.text = message
+
 func _ready_status() -> String:
  if state.is_empty(): return L.text("ready")
  if dialogue_pending: return L.text("thinking")
  var side_label := "Играем за: " if L.language == "ru" else "Playing as: "
  var result := side_label + L.country(int(state.side))
+ if network_state.get("active", false):
+  result = side_label + L.country(int(network_state.get("local_side", state.side)))
+  if network_state.get("status", "") == "disconnected":
+   return result + (" — связь потеряна, подключаемся заново" if L.language == "ru" else " — disconnected, reconnecting")
+  if network_state.get("duel") is Dictionary:
+   return result + (" — решение принимает " if L.language == "ru" else " — decision: ") + L.country(int(network_state.duel.decider))
+  if not network_state.get("can_act", false):
+   return result + (" — ожидание второго игрока" if L.language == "ru" else " — waiting for the other player")
+  return result
  if state.get("tutorial", {}).get("active", false):
   result = L.text("training_status")
  if int(state.get("level", 1)) == 5:
@@ -538,6 +639,9 @@ func _ready_status() -> String:
  return result
 
 func _crisis_identity() -> String:
+ if network_state.get("duel") is Dictionary:
+  var duel: Dictionary = network_state.duel
+  return JSON.stringify([state.get("year"), duel.get("phase"), duel.get("level"), duel.get("decider"), duel.get("actor"), duel.get("victim"), duel.get("action"), duel.get("old"), duel.get("new"), duel.get("summitBy"), L.language])
  if state.is_empty() or not state.get("crisis", {}).get("active", false):
   return ""
  var crisis: Dictionary = state.crisis
@@ -560,19 +664,14 @@ func _request_map_report() -> void:
    return
   map_report = response.get("report", {})
   map_view.apply_report(map_report)
-  map_picker.clear()
-  for item in map_report.get("registry", []):
-   var index := map_picker.item_count
-   map_picker.add_item(Reports.wording(item, "label"), int(item.id))
-   map_picker.set_item_disabled(index, not bool(item.get("available", false)))
-   if int(item.id) == map_mode_id: map_picker.select(index)
+  _populate_map_modes()
   var perspective = map_report.get("source_country")
   map_source_label.text = L.text("map_perspective") + ": " + L.country(int(perspective)) if perspective != null else ("Общий показатель" if L.language == "ru" else "Global indicator")
   _clear(map_legend)
   for item in map_report.get("scale", {}).get("legend", []):
    var chip := HBoxContainer.new()
    var swatch := ColorRect.new()
-   swatch.color = Color(str(item.get("color", "#babba4")))
+   swatch.color = map_view.presentation_color(str(item.get("color", "#babba4"))) if map_view.has_method("presentation_color") else Color(str(item.get("color", "#babba4")))
    swatch.custom_minimum_size = Vector2(12, 12)
    swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
    chip.add_child(swatch)
@@ -592,6 +691,9 @@ func _render_crisis() -> void:
  _clear(crisis_box)
  _clear(crisis_actions)
  crisis_actions.visible = false
+ if network_state.get("duel") is Dictionary:
+  _render_duel(network_state.duel)
+  return
  var crisis: Dictionary = state.get("crisis", {})
  if not crisis.get("active", false):
   return
@@ -625,8 +727,51 @@ func _render_crisis() -> void:
  brief_button.disabled = dialogue_pending
  crisis_box.add_child(brief_button)
 
+func _render_duel(duel: Dictionary) -> void:
+ var ru := L.language == "ru"
+ var local_side := int(network_state.get("local_side", 0))
+ var decider := int(duel.get("decider", 0))
+ crisis_box.add_child(_label(L.text("crisis"), 22, Color("e6ac94")))
+ crisis_box.add_child(_label("%s: %s" % [L.text("rung"), int(duel.get("level", 9))], 18))
+ var headline := str(duel.get("headline", ""))
+ if ru:
+  headline = "%s: %s — %s\n%s → %s" % [L.country(int(duel.get("actor", 0))), L.country(int(duel.get("victim", 2))), L.policy(int(duel.get("action", 0))), L.step(int(duel.get("action", 0)), int(duel.get("old", 0))), L.step(int(duel.get("action", 0)), int(duel.get("new", 0)))]
+ crisis_box.add_child(_label(headline, 16, PAPER, true))
+ crisis_box.add_child(_label(("Решение принимает: " if ru else "Decision belongs to: ") + L.country(decider), 16, Color("eddaa8"), true))
+ var phase := str(duel.get("phase", ""))
+ if phase == "summit":
+  crisis_box.add_child(_label("Предложена встреча: согласие завершит кризис, отказ повлияет на доверие." if ru else "A summit is proposed: accepting ends the crisis; refusing affects credibility.", 15, PAPER, true))
+ else:
+  crisis_box.add_child(_label(L.text("crisis_note"), 14, MUTED, true))
+ var risk := int(duel.get("usaRisk" if local_side == 0 else "ussrRisk", 0))
+ crisis_box.add_child(_label(("Важность для вашей стороны: " if ru else "Importance to your side: ") + str(risk) + "/7", 14, MUTED, true))
+ if duel.has("local_prestige_at_risk"):
+  crisis_box.add_child(_label(L.text("risk") + ": " + str(duel.local_prestige_at_risk), 16, Color("e6ac94"), true))
+ var captions := {"accept": ["Let it stand", "Не оспаривать"], "contest": ["Contest", "Оспорить"], "back_down": ["Back down", "Уступить"], "tough": ["Stand firm", "Настаивать"], "summit": ["Summit", "Встреча"], "yes": ["Accept", "Согласиться"], "no": ["Decline", "Отказаться"]}
+ for choice in duel.get("choices", []):
+  var caption: Array = captions.get(str(choice), [str(choice), str(choice)])
+  var button := _button(str(caption[1 if ru else 0]), func(): _command("crisis_choice", {"choice": str(choice)}))
+  button.name = "CrisisChoice_" + str(choice)
+  button.disabled = busy or local_side != decider or network_state.get("status", "") != "playing"
+  button.add_theme_font_size_override("font_size", 14)
+  crisis_actions.add_child(_expand(button))
+ crisis_actions.visible = crisis_actions.get_child_count() > 0
+ var names := AdvisorPanel.names_for_side(local_side, L.language)
+ var advice: Array = dialogue_result.get("advice", duel.get("advice_ru" if ru else "advice", []))
+ for index in range(advice.size()):
+  crisis_box.add_child(HSeparator.new())
+  if index < names.size(): crisis_box.add_child(_label(str(names[index]), 15, Color("83bad5"), true))
+  crisis_box.add_child(_label(str(advice[index]), 14, PAPER, true))
+ if dialogue_pending:
+  crisis_box.add_child(_label(L.text("thinking"), 15, Color("eddaa8"), true))
+ elif not dialogue_result.is_empty():
+  crisis_box.add_child(_label(str(dialogue_result.get("status", "")), 12, MUTED, true))
+ var briefing := _button(L.text("briefing"), _crisis_briefing)
+ briefing.disabled = dialogue_pending
+ crisis_box.add_child(briefing)
+
 func _crisis_briefing() -> void:
- if state.is_empty() or not state.crisis.active or model_revision == revision:
+ if state.is_empty() or (not state.crisis.active and not network_state.get("duel") is Dictionary) or model_revision == revision:
   return
  model_revision = revision
  dialogue_identity = _crisis_identity()
@@ -635,7 +780,7 @@ func _crisis_briefing() -> void:
  var identity := dialogue_identity
  dialogue_pending = true
  _render_crisis()
- status_label.text = L.text("thinking")
+ _set_status(L.text("thinking"))
  _command("crisis_dialogue", {"language": L.language}, func(response):
   if generation != dialogue_generation or identity != _crisis_identity(): return
   dialogue_pending = false
@@ -656,7 +801,7 @@ func _dialog(title_text: String, dialog_size: Vector2i = Vector2i(660, 560)) -> 
   popup.queue_free()
  popup = Window.new()
  popup.title = title_text
- popup.size = dialog_size
+ popup.size = Vector2i(mini(dialog_size.x, int(get_viewport_rect().size.x) - 32), mini(dialog_size.y, int(get_viewport_rect().size.y) - 32))
  popup.min_size = Vector2i(480, 360)
  popup.transient = true
  popup.exclusive = true
@@ -735,12 +880,16 @@ func _new_game_dialog() -> void:
  difficulty.select(2)
  column.add_child(difficulty)
  column.add_child(_label(L.text("guide_live"), 14, MUTED, true))
- column.add_child(_button(L.text("start"), func():
-  var args := {"side": side.selected, "level": difficulty.selected + 1, "seed": int(Time.get_unix_time_from_system())}
+ var start_button := _button(L.text("start"), func():
+  var args := {"side": side.selected, "level": difficulty.selected + 1, "seed": 1982 if smoke_test else int(Time.get_unix_time_from_system())}
   owning_popup.queue_free()
   guide_step = 0
-  _command("new_game", args)
- ))
+  _command("new_game", args, func(response):
+   if response.get("ok", false): _show_game()
+  )
+ )
+ start_button.name = "StartCampaignButton"
+ column.add_child(start_button)
 
 func _intelligence_dialog() -> void:
  if state.is_empty() or busy or state.crisis.active or state.ended:
@@ -777,13 +926,16 @@ func _advisor_dialog() -> void:
  advisor_panel.open(self)
 
 func _toggle_guide() -> void:
- _command("tutorial_start")
+ _command("tutorial_start", {}, func(response):
+  if response.get("ok", false): _show_game()
+ )
 
 func _update_guide() -> void:
  if not is_instance_valid(guide_box): return
  guide_box.visible = guide_enabled
- map_view.custom_minimum_size.y = 200 if guide_enabled else 270
- news_scroll.custom_minimum_size.y = 95 if guide_enabled else 155
+ if is_instance_valid(guide_panel): guide_panel.visible = guide_enabled and game_visible
+ map_view.custom_minimum_size.y = 200
+ news_scroll.custom_minimum_size.y = 155
  if state.get("tutorial", {}).get("active", false):
   guide_step = int(state.tutorial.get("step", 0))
  guide_label.text = L.text("lesson_" + str(guide_step)) if guide_step < 6 else L.text("lesson_done")
@@ -836,8 +988,17 @@ func _next_track() -> void:
 
 func _smoke_next(command: String) -> void:
  if smoke_phase == 0 and command == "new_game":
+  # The campaign becomes visible only after the successful response. Let its
+  # containers settle before measuring, including in headless smoke runs.
+  await get_tree().process_frame
+  await get_tree().process_frame
+  await _snapshot_screen("game")
+  if map_view.size.x * map_view.size.y < get_viewport_rect().size.x * get_viewport_rect().size.y * 0.70:
+   push_error("Map does not occupy 70 percent of the viewport")
+   get_tree().quit(1)
+   return
   smoke_phase = 1
-  _command.call_deferred("select_country", {"country_id": 4})
+  map_view.country_selected.emit(4)
  elif smoke_phase == 1 and command == "select_country":
   var found := false
   for policy in state.selection.policies:
@@ -1006,6 +1167,8 @@ func _finish_smoke_settings() -> void:
  _smoke_map_mode(2)
 
 func _smoke_map_mode(mode: int) -> void:
+ map_group_picker.select(0 if mode < 8 else 1 if mode <= 21 or mode >= 58 else 2)
+ _populate_map_modes()
  var index := map_picker.get_item_index(mode)
  if index < 0 or map_picker.is_item_disabled(index):
   push_error("Map mode is unavailable")
@@ -1030,7 +1193,7 @@ func _finish_smoke_map(mode: int) -> void:
 
 func _after_smoke_advice(response: Dictionary) -> void:
  if not response.get("ok", false) or int(response.state.tutorial.step) != 6:
-  push_error("Tutorial advisor completion failed")
+  push_error("Tutorial advisor completion failed; step=" + str(response.get("state", {}).get("tutorial", {}).get("step", -1)))
   get_tree().quit(1)
   return
  var displayed: TextEdit = popup.find_child("AdvisorAnswer", true, false)
@@ -1077,6 +1240,7 @@ func _smoke_crisis_choice(choice: String) -> void:
 
 func _snapshot_screen(suffix: String) -> void:
  if screenshot_path.is_empty() or DisplayServer.get_name() == "headless": return
+ get_window().move_to_foreground()
  if not reduced_motion: await get_tree().create_timer(0.55).timeout
  await get_tree().process_frame
  await get_tree().process_frame
@@ -1090,6 +1254,7 @@ func _capture() -> void:
  await get_tree().process_frame
  await get_tree().process_frame
  if not screenshot_path.is_empty() and DisplayServer.get_name() != "headless":
+  get_window().move_to_foreground()
   await RenderingServer.frame_post_draw
   var output := get_viewport().get_texture().get_image()
   var result := output.save_png(screenshot_path)
@@ -1098,5 +1263,231 @@ func _capture() -> void:
    get_tree().quit(1)
    return
  if smoke_test:
-  print("GODOT_SMOKE_OK: map modes, policy controls, crisis, year, save/load, isolated tutorial, advisor, campaign restore, scores, objectives, country history, AI settings, Russian UI")
-  get_tree().quit(0)
+  _smoke_desktop_workflows()
+
+func _smoke_desktop_workflows() -> void:
+ # Run through the same HTTP bridge in source and frozen builds, in the
+ # launcher's disposable directory. This also checks Qt-free mail packaging.
+ var directory := OS.get_environment("BOP_USER_DIR")
+ if directory.is_empty():
+  push_error("Desktop smoke requires an isolated directory")
+  get_tree().quit(1)
+  return
+ var portable := directory.path_join("smoke-roundtrip.bopg")
+ var steps := [
+  ["save", {"slot": "smoke-named"}], ["save_list", {}],
+  ["export_game", {"path": portable}], ["import_game", {"path": portable}],
+  ["multiplayer_hotseat", {"side": 0, "level": 3, "seed": 1982}],
+  ["end_turn", {}], ["save", {"slot": "smoke-hotseat"}], ["load", {"slot": "smoke-hotseat"}],
+  ["multiplayer_leave", {}],
+  ["multiplayer_host", {"bind": "127.0.0.1", "port": 0}], ["multiplayer_leave", {}],
+  ["multiplayer_mail_create", {"directory": directory.path_join("mail"), "game_id": "smoke", "side": 0}],
+  ["end_turn", {}], ["multiplayer_mail_submit", {}], ["multiplayer_leave", {}],
+  ["save_delete", {"slot": "smoke-hotseat"}], ["save_delete", {"slot": "smoke-named"}]
+ ]
+ for step in steps:
+  var completed := {"done": false, "response": {}}
+  _command(str(step[0]), step[1], func(response): completed.response = response; completed.done = true)
+  while not completed.done: await get_tree().process_frame
+  var response: Dictionary = completed.response
+  var valid := bool(response.get("ok", false))
+  if step[0] == "save_list": valid = valid and response.get("saves", []).any(func(slot): return slot.slot == "smoke-named")
+  elif step[0] == "load": valid = valid and network_state.get("mode", "") == "hotseat" and int(network_state.get("local_side", -1)) == 1
+  elif step[0] == "multiplayer_host": valid = valid and int(network_state.get("port", 0)) > 0
+  elif step[0] == "multiplayer_mail_create": valid = valid and network_state.get("mode", "") == "mail"
+  if not valid:
+   push_error("Desktop smoke failed: " + str(step[0]))
+   get_tree().quit(1)
+   return
+ print("GODOT_SMOKE_OK: start menu, map modes, policy controls, crisis, year, named saves, portable files, hotseat resume, LAN host, mail submit, isolated tutorial, advisors, reports, AI settings, Russian UI")
+ get_tree().quit(0)
+
+func _show_drawer(drawer: Control) -> void:
+ if not is_instance_valid(drawer): return
+ drawer.show()
+ if not reduced_motion:
+  drawer.modulate.a = 0.0
+  create_tween().tween_property(drawer, "modulate:a", 1.0, 0.16)
+
+func _toggle_drawer(drawer: Control) -> void:
+ if drawer.visible: drawer.hide()
+ else: _show_drawer(drawer)
+
+func _show_game() -> void:
+ game_visible = true
+ ui.show()
+ if is_instance_valid(start_screen):
+  start_screen.hide()
+  start_screen.queue_free()
+ if is_instance_valid(guide_panel): guide_panel.visible = guide_enabled
+ if state.get("crisis", {}).get("active", false) or network_state.get("duel") is Dictionary:
+  _show_drawer(country_drawer)
+
+func _show_start_menu() -> void:
+ game_visible = false
+ if is_instance_valid(ui): ui.hide()
+ if is_instance_valid(start_screen): start_screen.queue_free()
+ if is_instance_valid(country_drawer): country_drawer.hide()
+ if is_instance_valid(news_drawer): news_drawer.hide()
+ if is_instance_valid(guide_panel): guide_panel.hide()
+ start_screen = PanelContainer.new()
+ start_screen.name = "StartMenu"
+ start_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ start_screen.add_theme_stylebox_override("panel", _style(Color("152f40")))
+ add_child(start_screen)
+ var margin := MarginContainer.new()
+ for edge in ["left", "right", "top", "bottom"]: margin.add_theme_constant_override("margin_" + edge, 42)
+ start_screen.add_child(margin)
+ var row := HBoxContainer.new()
+ row.add_theme_constant_override("separation", 48)
+ margin.add_child(row)
+ var column := VBoxContainer.new()
+ column.custom_minimum_size.x = 330
+ column.add_theme_constant_override("separation", 9)
+ row.add_child(column)
+ column.add_child(_label(L.text("title"), 42, Color("eddaa8")))
+ column.add_child(_label(L.text("subtitle"), 18, MUTED))
+ column.add_child(HSeparator.new())
+ var continue_button := Button.new()
+ continue_button.text = L.text("continue")
+ continue_button.pressed.connect(func():
+  var slot := str(continue_button.get_meta("last_slot", ""))
+  if slot.is_empty(): _show_game()
+  else: _command("load", {"slot": slot}, func(result):
+   if result.get("ok", false): _show_game()
+  )
+ )
+ continue_button.name = "ContinueButton"
+ continue_button.disabled = state.is_empty()
+ column.add_child(continue_button)
+ if state.is_empty() and not backend_url.is_empty():
+  _command("save_list", {}, func(response):
+   if not is_instance_valid(continue_button): return
+   var last: String = response.last_slot if response.get("ok", false) and response.get("last_slot") is String else ""
+   continue_button.disabled = last.is_empty()
+   if not last.is_empty():
+    continue_button.set_meta("last_slot", last)
+  , true)
+ var new_button := _button(L.text("new"), _new_game_dialog)
+ new_button.name = "NewGameButton"
+ new_button.disabled = network_state.get("active", false)
+ column.add_child(new_button)
+ column.add_child(_button(L.text("load"), _open_saves))
+ var learn_button := _button(L.text("learn"), _toggle_guide)
+ learn_button.disabled = network_state.get("active", false)
+ column.add_child(learn_button)
+ column.add_child(_button(L.text("multiplayer"), _open_multiplayer))
+ column.add_child(_button(L.text("settings"), _open_preferences))
+ column.add_child(_button(L.text("help"), _open_help))
+ column.add_child(_button(L.text("credits"), _credits))
+ column.add_child(_expand(Control.new()))
+ column.add_child(_button(L.text("quit"), func(): get_tree().quit()))
+ var context := VBoxContainer.new()
+ context.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ row.add_child(context)
+ var backdrop := WorldMap.new()
+ backdrop.custom_minimum_size = Vector2(200, 280)
+ backdrop.size_flags_vertical = Control.SIZE_EXPAND_FILL
+ backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ context.add_child(backdrop)
+ context.add_child(_label(L.text("menu_brief"), 22, PAPER, true))
+ context.add_child(_label(L.text("menu_hint"), 16, MUTED, true))
+ menu_status_label = _label("", 14, Color("eddaa8"), true)
+ menu_status_label.name = "MenuStatus"
+ context.add_child(menu_status_label)
+ new_button.grab_focus()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+ if event is InputEventKey and event.pressed and not event.echo:
+  if event.keycode == KEY_ESCAPE:
+   if is_instance_valid(popup) and popup.visible:
+    popup.hide()
+    popup.exclusive = false
+    popup.queue_free()
+   elif game_visible:
+    _show_start_menu()
+   elif not state.is_empty():
+    _show_game()
+   get_viewport().set_input_as_handled()
+  elif event.keycode == KEY_F1:
+   _open_help()
+   get_viewport().set_input_as_handled()
+
+func _open_saves() -> void:
+ load("res://scripts/saves_panel.gd").new().show(self)
+
+func _open_multiplayer() -> void:
+ load("res://scripts/multiplayer_panel.gd").new().show(self)
+
+func _open_help() -> void:
+ load("res://scripts/manual.gd").show(self)
+
+func _open_reports() -> void:
+ var column := _dialog("Сведения о кампании" if L.language == "ru" else "Campaign reports", Vector2i(560, 510))
+ column.add_child(_button(L.text("scores"), func(): Reports.show_report(self, "scores")))
+ column.add_child(_button(L.text("objectives"), func(): Reports.show_report(self, "objectives")))
+ column.add_child(_button(L.text("intelligence"), _intelligence_dialog))
+ column.add_child(_button("Решения соперника" if L.language == "ru" else "Opponent decisions", func(): load("res://scripts/opponent_panel.gd").new().show(self)))
+ undo_button = _button("Отменить прошлый ход" if L.language == "ru" else "Undo last turn", func():
+  popup.hide()
+  popup.queue_free()
+  _command("undo")
+ )
+ undo_button.disabled = not state.get("undo_available", false)
+ column.add_child(undo_button)
+ column.add_child(_button(L.text("help"), _open_help))
+
+func _open_preferences() -> void:
+ var column := _dialog(L.text("settings"), Vector2i(620, 600))
+ var music := CheckButton.new()
+ music.text = L.text("music")
+ music.button_pressed = music_enabled
+ music.toggled.connect(func(value): music_enabled = value; _play_music(); _save_preferences())
+ column.add_child(music)
+ var slider := HSlider.new()
+ slider.min_value = -40
+ slider.max_value = 0
+ slider.value = volume
+ slider.value_changed.connect(func(value): volume = value; audio_player.volume_db = value; _save_preferences())
+ column.add_child(_label(L.text("volume")))
+ column.add_child(slider)
+ var tracks := OptionButton.new()
+ for track in track_names: tracks.add_item(str(track).get_basename().replace("_", " "))
+ tracks.select(track_index)
+ tracks.item_selected.connect(func(index): track_index = index; audio_player.stop(); _play_music(); _save_preferences())
+ column.add_child(tracks)
+ var motion := CheckButton.new()
+ motion.text = L.text("motion")
+ motion.button_pressed = reduced_motion
+ motion.toggled.connect(func(value): reduced_motion = value; map_view.reduced_motion = value; _save_preferences())
+ column.add_child(motion)
+ var colors := CheckButton.new()
+ colors.text = L.text("colorblind")
+ colors.button_pressed = colorblind
+ colors.toggled.connect(func(value): colorblind = value; map_view.set("colorblind", value); map_view.queue_redraw(); map_request_key = ""; _request_map_report(); _save_preferences())
+ column.add_child(colors)
+ var relief := CheckButton.new()
+ relief.text = "Рельеф карты" if L.language == "ru" else "Terrain relief"
+ relief.button_pressed = relief_enabled
+ relief.toggled.connect(func(value): relief_enabled = value; map_view.relief_enabled = value; _save_preferences())
+ column.add_child(relief)
+ var effects := CheckButton.new()
+ effects.text = L.text("sfx")
+ effects.button_pressed = sfx_enabled
+ effects.toggled.connect(func(value): sfx_enabled = value; _save_preferences())
+ column.add_child(effects)
+ column.add_child(_button("Русский" if L.language == "en" else "English", _change_language))
+ column.add_child(_button(L.text("ai_settings"), _open_ai_settings))
+ column.add_child(_button(L.text("intelligence"), _intelligence_dialog))
+
+func _populate_map_modes() -> void:
+ map_picker.clear()
+ var group := map_group_picker.selected
+ for item in map_report.get("registry", []):
+  var mode := int(item.id)
+  var belongs := (mode < 8) if group == 0 else ((mode >= 8 and mode <= 21) or mode >= 58) if group == 1 else (mode >= 22 and mode < 58)
+  if not belongs: continue
+  var index := map_picker.item_count
+  map_picker.add_item(Reports.wording(item, "label"), mode)
+  map_picker.set_item_disabled(index, not bool(item.get("available", false)))
+  if mode == map_mode_id: map_picker.select(index)

@@ -3,8 +3,9 @@
 **[Описание на русском — README.ru.md](README.ru.md)**
 
 **Godot desktop prototype:** the new engine presents the original Python
-simulation with English/Russian UI, 60 map modes, country history, scores,
-objectives, contextual AI advisors and an isolated learning course. Start with
+simulation with English/Russian UI and manual, 60 map modes, reports, contextual
+AI advisors, a learning course, named saves and multiplayer (LAN, hotseat and
+shared-folder play-by-mail). Godot and older Qt clients do not directly crossplay. Start with
 `python3 tools/run_godot.py --language en`. See the [prototype guide](docs/ENGINE_PROTOTYPE.md)
 for standalone builds, AI configuration and current scope. The Qt application
 below remains available, including multiplayer.

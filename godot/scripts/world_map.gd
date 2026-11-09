@@ -14,11 +14,41 @@ var dragging := false
 var reduced_motion := false
 var selection_glow := 0.0
 var selection_tween: Tween
+var colorblind := false:
+ set(value):
+  colorblind = value
+  queue_redraw()
+var relief_enabled := false:
+ set(value):
+  relief_enabled = value
+  queue_redraw()
+var safe_colors: Dictionary = {}
+var relief_layer: TextureRect
+var foreground: Control
+
+class Foreground extends Control:
+ var chart: Control
+ func _draw() -> void:
+  chart.draw_foreground(self)
 
 func _ready() -> void:
  mouse_filter = Control.MOUSE_FILTER_STOP
  focus_mode = Control.FOCUS_ALL
  clip_contents = true
+ safe_colors = JSON.parse_string(FileAccess.get_file_as_string("res://assets/color_safe.json"))
+ relief_layer = TextureRect.new()
+ relief_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ relief_layer.texture = preload("res://assets/relief_source.png")
+ relief_layer.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+ var shade := ShaderMaterial.new()
+ shade.shader = preload("res://scripts/relief.gdshader")
+ relief_layer.material = shade
+ add_child(relief_layer)
+ foreground = Foreground.new()
+ foreground.chart = self
+ foreground.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ foreground.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ add_child(foreground)
  var data: Array = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map.json"))
  for entry in data:
   var points := PackedVector2Array()
@@ -71,22 +101,27 @@ func transform_map() -> Transform2D:
 
 func tint(id: int) -> Color:
  if report_values.has(id):
-  var exact := Color(str(report_values[id].get("color", "#babba4")))
+  var exact := presentation_color(str(report_values[id].get("color", "#babba4")))
   return exact.lightened(0.13) if id == hovered else exact
  if id == 0:
-  return Color("547d9c")
+  return presentation_color("#547d9c")
  if id == 1:
-  return Color("ad6863")
+  return presentation_color("#ad6863")
  var base := Color("babba4")
  if id < countries.size():
   var c: Dictionary = countries[id]
   if mode == 1:
    return Color("617f82").lerp(Color("e7d2a5"), clampf(float(c.get("prestige", 0)) / 130.0, 0, 1))
   var opinion := float(c.get("standing", 0)) / 127.0
-  base = base.lerp(Color("91b9ab") if opinion >= 0 else Color("bf7b70"), absf(opinion) * 0.9)
+  var friendly := Color("82afdc") if colorblind else Color("91b9ab")
+  var hostile := Color("f0aa6e") if colorblind else Color("bf7b70")
+  base = base.lerp(friendly if opinion >= 0 else hostile, absf(opinion) * 0.9)
  if id == hovered:
   base = base.lightened(0.13)
  return base
+
+func presentation_color(value: String) -> Color:
+ return Color(str(safe_colors.get(value.to_lower(), value))) if colorblind else Color(value)
 
 func _draw() -> void:
  draw_rect(Rect2(Vector2.ZERO, size), Color("193b50"))
@@ -104,10 +139,20 @@ func _draw() -> void:
   var fill := tint(polygon.id)
   RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), polygon.indices, polygon.vertices, PackedColorArray([fill]))
   draw_polyline(polygon.outline, Color("365061"), line_width * 0.7, true)
+ if is_instance_valid(relief_layer):
+  relief_layer.visible = relief_enabled
+  relief_layer.position = transform.origin
+  relief_layer.size = Vector2(948, 483) * transform.get_scale()
+ if is_instance_valid(foreground): foreground.queue_redraw()
+
+func draw_foreground(surface: Control) -> void:
+ var transform := transform_map()
+ surface.draw_set_transform_matrix(transform)
+ var line_width := 1.0 / transform.get_scale().x
  for polygon in polygons:
   if polygon.id == selected and polygon.points.size() >= 3:
-   draw_polyline(polygon.outline, Color("f4df9d"), line_width * (2.4 + selection_glow * 2.5), true)
- draw_set_transform_matrix(Transform2D.IDENTITY)
+   surface.draw_polyline(polygon.outline, Color("f4df9d"), line_width * (2.4 + selection_glow * 2.5), true)
+ surface.draw_set_transform_matrix(Transform2D.IDENTITY)
  var font := ThemeDB.fallback_font
  if hovered >= 0:
   var label := L.country(hovered)
@@ -118,8 +163,8 @@ func _draw() -> void:
   var at := get_local_mouse_position() + Vector2(16, -34)
   at.x = clampf(at.x, 8, maxf(8, size.x - extent.x - 24))
   at.y = maxf(8, at.y)
-  draw_style_box(_tooltip_box(), Rect2(at, extent + Vector2(20, 12)))
-  draw_string(font, at + Vector2(10, 22), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("f2f1df"))
+  surface.draw_style_box(_tooltip_box(), Rect2(at, extent + Vector2(20, 12)))
+  surface.draw_string(font, at + Vector2(10, 22), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("f2f1df"))
 
 func _tooltip_box() -> StyleBoxFlat:
  var box := StyleBoxFlat.new()

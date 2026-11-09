@@ -85,16 +85,21 @@ def main():
     run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--name', 'BalanceOfPower',
          '--distpath', str(work / 'dist'), '--workpath', str(work / 'work'), '--specpath', str(work),
          '--paths', str(ROOT), '--add-data', str(ROOT / 'data') + os.pathsep + 'data',
+         '--exclude-module', 'PyQt5', '--exclude-module', 'Net.MailQt',
          '--collect-submodules', 'EngineBridge', '--collect-submodules', 'GameLogic', str(ROOT / 'tools/run_godot.py')])
     built = work / 'dist' / 'BalanceOfPower'
     for item in built.iterdir():
         dest = output / item.name
-        if item.is_dir(): shutil.copytree(item, dest, dirs_exist_ok=True)
+        if item.is_dir():
+            # Never retain dependencies removed from a subsequent frozen build.
+            if dest.exists(): shutil.rmtree(dest)
+            shutil.copytree(item, dest)
         else: shutil.copy2(item, dest)
     credits = output / 'credits'
     credits.mkdir(exist_ok=True)
     for source in (ROOT / 'godot/assets/advisors/ATTRIBUTION.md', ROOT / 'godot/assets/advisors/manifest.json', ROOT / 'godot/assets/music/ATTRIBUTION.md', ROOT / 'godot/assets/music/licensed_tracks.json'):
         shutil.copy2(source, credits / (source.parent.name + '-' + source.name))
+    shutil.copy2(ROOT / 'godot/assets/ATTRIBUTION.md', credits / 'GAME-ASSETS.md')
     for name in ('GODOT-LICENSE.txt', 'GODOT-COPYRIGHT.txt'):
         shutil.copy2(ROOT / 'packaging/godot' / name, credits / name)
     pyinstaller = importlib.metadata.distribution('pyinstaller')
