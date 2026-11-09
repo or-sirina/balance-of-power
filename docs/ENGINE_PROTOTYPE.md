@@ -28,6 +28,8 @@ Multiplayer supports LAN hosting and joining, discovery, chat and reconnection, 
 
 The [interactive map prototype](LIVING_MAP.md) adds original 3D city miniatures with streets and trees, stronger terrain relief, conflict/unrest scenes, clickable event briefings and aid/trade links. The Layers menu keeps these overlays optional. Wheel or +/− zoom, double-click focuses a country, and F restores the world view. Country positions remain schematic until the geographic map is replaced.
 
+**Dispatches / Донесения** opens an interactive briefing over the map. Search the full current news feed, filter policy moves, world events or moves that can be challenged, and select a story to see its country outline, full report, policy values and context. **Show on map** focuses the related country; **Country details** opens its report. Eligible stories retain the existing crisis challenge action. The feed follows the simulation’s importance order, rather than inventing publication times, and preserves the selected story through ordinary updates. Generated reports have no individual timestamps; known historical events show their recorded year.
+
 ## Architecture and settings
 
 `EngineBridge` hosts the Python engine in the launcher process. Godot sends JSON commands to a loopback HTTP server (`POST /command`) with a per-launch bearer token. The server returns game state and command results; the Python engine remains responsible for game rules and save data. The launcher stops the server and game together. This local protocol is an implementation interface, not a public remote service. The Python core is retained: there is no measured need to rewrite it. A local benchmark of optimized state/select operations was around 1 ms; this is not a performance guarantee.
@@ -46,7 +48,7 @@ Russian localization covers the new Godot interface, country names, policy steps
 
 ![Russian map interface](screenshots/godot-map-workspace.png)
 
-[Learning session](screenshots/godot-tutorial.png) · [Practice crisis](screenshots/godot-tutorial-crisis.png) · [Policy controls](screenshots/godot-policy.png) · [Crisis](screenshots/godot-crisis.png) · [Advisor](screenshots/godot-advisor.png) · [Conversation](screenshots/godot-advisor-conversation.png) · [Advisor record](screenshots/godot-advisor-record.png) · [History](screenshots/godot-history.png) · [Scores](screenshots/godot-scores.png) · [AI settings](screenshots/godot-settings.png)
+[News briefing](screenshots/godot-news-feed.png) · [Learning session](screenshots/godot-tutorial.png) · [Practice crisis](screenshots/godot-tutorial-crisis.png) · [Policy controls](screenshots/godot-policy.png) · [Crisis](screenshots/godot-crisis.png) · [Advisor](screenshots/godot-advisor.png) · [Conversation](screenshots/godot-advisor-conversation.png) · [Advisor record](screenshots/godot-advisor-record.png) · [History](screenshots/godot-history.png) · [Scores](screenshots/godot-scores.png) · [AI settings](screenshots/godot-settings.png)
 
 ## Checks
 
@@ -63,7 +65,7 @@ The Godot smoke run uses the actual start-menu buttons and exercises named saves
 
 A graphical run captures the main screen and additional tutorial, policy, crisis, advisor, reports and settings PNGs with `python3 tools/run_godot.py --smoke-test --language ru --screenshot /absolute/path/screenshot.png`.
 
-Validation on 2026-11-10: all 131 tests in the combined local suite pass. These include ten full 1982–1990 campaign scenarios (both sides, levels 1–5), exact continuation after saving during a crisis, save/import/undo workflows, real two-service multiplayer, relay and reconnect, shared-folder turns, and Godot request and menu regressions. The suite uses explicit offline mode or local model stand-ins, without paid provider calls. Targeted Godot tests were rerun after the final menu fixes.
+Validation on 2026-11-10: all 144 tests in the combined local suite pass. These include ten full 1982–1990 campaign scenarios (both sides, levels 1–5), exact continuation after saving during a crisis, save/import/undo workflows, real two-service multiplayer, relay and reconnect, shared-folder turns, and Godot request, menu, interactive news and map regressions. The suite uses explicit offline mode or local model stand-ins, without paid provider calls. Targeted Godot tests were rerun after the final menu fixes.
 
 Graphical source smoke runs pass at 1280×800 and 1024×720. Normal UI callbacks also exercise new campaign, named save, hotseat and session reopening. The map occupies about 78% of the logical viewport with drawers closed. Map report modes 0–57 match the Qt values and colors for every country; trade modes 58–59 read the actual trade tables. The import-isolation check verifies that the backend needs no Qt runtime.
 

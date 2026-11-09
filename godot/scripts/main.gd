@@ -11,6 +11,7 @@ const Reports = preload("res://scripts/reports.gd")
 const AISettings = preload("res://scripts/ai_settings.gd")
 const AdvisorPanel = preload("res://scripts/advisor_panel.gd")
 const SoundSignals = preload("res://scripts/sound_signals.gd")
+const NewsPanel = preload("res://scripts/news_panel.gd")
 const MapPanel = preload("res://scripts/map_panel.gd")
 const INK = Color("152f40")
 const PAPER = Color("e7eadf")
@@ -51,8 +52,6 @@ var facts_label: Label
 var map_details_box: VBoxContainer
 var status_label: Label
 var policies_box: VBoxContainer
-var news_box: VBoxContainer
-var news_scroll: ScrollContainer
 var crisis_box: VBoxContainer
 var crisis_actions: HBoxContainer
 var country_picker: OptionButton
@@ -337,22 +336,15 @@ func _build_ui() -> void:
  map_legend = HFlowContainer.new()
  map_legend.add_theme_constant_override("h_separation", 16)
  left.add_child(map_legend)
- news_drawer = PanelContainer.new()
- news_drawer.add_theme_stylebox_override("panel", _style(INK))
+ news_drawer = NewsPanel.new()
  add_child(news_drawer)
- news_drawer.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
- news_drawer.offset_left = 24
- news_drawer.offset_right = -24
- news_drawer.offset_top = -220
+ news_drawer.configure(self)
+ news_drawer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ news_drawer.offset_left = 36
+ news_drawer.offset_right = -36
+ news_drawer.offset_top = 100
  news_drawer.offset_bottom = -42
  news_drawer.visible = false
- news_scroll = ScrollContainer.new()
- news_scroll.custom_minimum_size.y = 155
- news_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
- news_box = VBoxContainer.new()
- news_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
- news_scroll.add_child(news_box)
- news_drawer.add_child(news_scroll)
  country_drawer = PanelContainer.new()
  var sidebar := country_drawer
  sidebar.custom_minimum_size.x = 352
@@ -599,17 +591,7 @@ func _render_state() -> void:
  else:
   country_label.text = L.text("select")
   facts_label.text = ""
- _clear(news_box)
- var news: Array = state.news
- if news.is_empty():
-  news_box.add_child(_label(L.text("quiet"), 15, MUTED, true))
- for i in range(news.size() - 1, maxi(-1, news.size() - 31), -1):
-  var item: Dictionary = news[i]
-  var row := HBoxContainer.new()
-  row.add_child(_expand(_label(_news_text(item), 14, PAPER, true)))
-  if item.get("questionable", false) and not state.crisis.active and not state.ended and not network_state.get("active", false):
-   row.add_child(_button(L.text("challenge"), func(): _command("question", {"news_id": int(item.id)})))
-  news_box.add_child(row)
+ news_drawer.update_news(state, busy, network_state)
  _render_crisis()
  MapPanel.render_details(self, map_details_box)
  policies_box.visible = not bool(state.crisis.active) and not network_state.get("duel") is Dictionary
@@ -951,7 +933,6 @@ func _update_guide() -> void:
  guide_box.visible = guide_enabled
  if is_instance_valid(guide_panel): guide_panel.visible = guide_enabled and game_visible
  map_view.custom_minimum_size.y = 200
- news_scroll.custom_minimum_size.y = 155
  if state.get("tutorial", {}).get("active", false):
   guide_step = int(state.tutorial.get("step", 0))
  guide_label.text = L.text("lesson_" + str(guide_step)) if guide_step < 6 else L.text("lesson_done")
@@ -1320,6 +1301,7 @@ func _smoke_desktop_workflows() -> void:
 
 func _show_drawer(drawer: Control) -> void:
  if not is_instance_valid(drawer): return
+ if drawer == news_drawer and is_instance_valid(country_drawer): country_drawer.hide()
  drawer.show()
  if not reduced_motion:
   drawer.modulate.a = 0.0
@@ -1327,7 +1309,9 @@ func _show_drawer(drawer: Control) -> void:
 
 func _toggle_drawer(drawer: Control) -> void:
  if drawer.visible: drawer.hide()
- else: _show_drawer(drawer)
+ else:
+  if drawer == country_drawer and is_instance_valid(news_drawer): news_drawer.hide()
+  _show_drawer(drawer)
 
 func _show_game() -> void:
  game_visible = true

@@ -21,8 +21,9 @@ from GameLogic.World import World
 from Net import GameFile
 from Net.State import apply_state, clone_world, world_to_state
 
+from .news import present_news
 from .presenter import Presenter
-from .localization import country_name, crisis_advice_ru, error_ru, model_status, news_ru, reason_ru, reaction_ru, type_ru
+from .localization import country_name, crisis_advice_ru, error_ru, model_status, news_ru, reason_ru, reaction_ru
 from .tutorial import TutorialSession
 from .conversations import ConversationBook
 from .reports import ReportError, build_report
@@ -848,11 +849,8 @@ class GameService:
                 "tension_error": MovePlanner.estimate_error(w.intel[side]),
                 "countries": countries, "map_scene": build_map_scene(w),
                 "selected_country": self.selected_country, "selection": selection,
-                "news": [{"id": i, "text": n.text, "text_ru": news_ru(n), "type_ru": type_ru(n),
-                          "actor": n.actor.id, "target": n.target.id, "host": n.host.id,
-                          "action": n.action, "old": n.old, "new": n.new,
-                          "questionable": not self.ended and not panel.locked and CrisisHandler.canQuestion(w, n)}
-                         for i, n in enumerate(w.news)],
+                "news": present_news(w, lambda n: not self.ended and not panel.locked
+                                     and CrisisHandler.canQuestion(w, n)),
                 "crisis": {"active": panel.locked and not self.ended,
                            "headline": panel.newsHline.text, "reaction": panel.reactionLine.text,
                            "headline_ru": news_ru(w.crisis.whichHead) if w.crisis.whichHead is not None else "",
