@@ -18,7 +18,7 @@ jobs:
             platform: linux
           - runner: windows-2022
             platform: windows
-          - runner: macos-14
+          - runner: macos-15-intel
             platform: macos
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45

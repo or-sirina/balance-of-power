@@ -14,10 +14,10 @@ Python или Godot не нужно. Для русского языка испо
 для английского — --language en. Настройки и сохранения хранятся в профиле
 пользователя. При распространении игры сохраняйте папку credits.
 
-This prototype is under development. Builds are platform-specific; Windows and
-macOS builds require native testing. macOS signing and notarization are not yet
-configured. Linux requires compatible system libraries.
+This prototype is under development. Builds are platform-specific. The macOS
+CI package targets Intel x86_64; signing and notarization are not yet configured.
+Linux requires compatible system libraries.
 Эта версия находится в разработке. Сборки предназначены для конкретной системы;
-версии Windows и macOS требуют проверки на соответствующих платформах. Подпись
-и нотариальное заверение macOS ещё не настроены. Linux требует совместимых
+сборка macOS из CI рассчитана на Intel x86_64. Подпись и нотариальное заверение
+macOS ещё не настроены. Linux требует совместимых
 системных библиотек.

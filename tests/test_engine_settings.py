@@ -104,7 +104,9 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn("api_key", result)
         self.assertNotIn("fake-new-secret", json.dumps(result))
         self.assertEqual(self.stored()["api_key"], "fake-new-secret")
-        self.assertEqual(stat.S_IMODE(os.stat(Paths.user_file("llm.json")).st_mode), 0o600)
+        if os.name == "posix":
+            # Windows stat mode bits do not describe access controlled by ACLs.
+            self.assertEqual(stat.S_IMODE(os.stat(Paths.user_file("llm.json")).st_mode), 0o600)
 
     def test_blank_preserves_key_and_explicit_clear_removes_it(self):
         self.seed()
