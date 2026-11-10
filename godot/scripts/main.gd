@@ -366,7 +366,7 @@ func _build_ui() -> void:
  country_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  for i in range(80):
   country_picker.add_item(L.country(i), i)
- country_picker.item_selected.connect(_select_country)
+ country_picker.item_selected.connect(_select_country_from_list)
  side_column.add_child(country_picker)
  var side_scroll := ScrollContainer.new()
  side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -532,6 +532,11 @@ func _select_country(country_id: int) -> void:
  _show_drawer(country_drawer)
  _command("select_country", {"country_id": country_id})
 
+func _select_country_from_list(country_id: int) -> void:
+ _command("select_country", {"country_id": country_id}, func(response):
+  if response.get("ok", false): map_view.focus_country(country_id)
+ )
+
 func _open_ai_settings() -> void:
  ai_settings.open(self, _settings_request, L.language)
 
@@ -562,6 +567,8 @@ func _render_state() -> void:
   return
  if is_instance_valid(sound_signals): sound_signals.observe(state, sfx_enabled, volume, smoke_test)
  var current_year := int(state.year)
+ L.campaign_year = current_year
+ country_picker.set_item_text(68, L.country(68))
  year_label.text = str(current_year)
  if shown_year > 0 and shown_year != current_year and not reduced_motion:
   year_label.modulate = Color("a4d7cb")

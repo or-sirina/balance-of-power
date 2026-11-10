@@ -1,41 +1,60 @@
-# Interactive map prototype
+# Interactive geographic map
 
-The Godot map now combines the original country geometry and terrain relief with original 3D city miniatures, streets, trees and country-level event scenes. It retains every map mode, country policy and simulation rule. The visual reference is the layered terrain, city silhouettes and readable zoom levels in [HOI4's map presentation](https://forum.paradoxplaza.com/forum/threads/hoiiv-developer-diary-11-map-graphics-no-counters-discussion.814718/); no assets from that game are included.
+The Godot map now uses a continuous **1982 geographic reconstruction**, with no enlarged country insets. All 80 simulation identities remain selectable. The map restores the USSR, Yugoslavia, Czechoslovakia, Sudan and Ethiopia; divides Germany and the two Yemens; and represents West Berlin as an enclave. The original Qt map and simulation rules are unchanged.
 
-![Map overview](screenshots/godot-living-map.png)
+![Geographic world](screenshots/godot-geographic-world.png)
 
-![Detail view](screenshots/godot-living-detail.png)
+![Germany and its neighbors](screenshots/godot-geographic-europe.png)
 
 ## Controls
 
-- Wheel or +/−: zoom around the pointer or view center. Middle drag: pan.
-- Double-click a country: focus it. F or Whole map: reset.
-- Click a city: open its country details. Click an event: show its security assessment and relevant news.
-- Layers: toggle city miniatures/streets, terrain, event markers, labels and aid/trade connections. Connections start hidden to keep the world view readable; select a country to isolate its links.
-- Click a connection: inspect the exact existing policy amount and open the target country.
+- Wheel or +/−: zoom around the pointer or view center, up to 24×. Middle drag: pan.
+- Double-click a country, select it in the Country list, or use a dispatch's Show on map action to focus its government seat. F or Fit map restores the world view.
+- Click a city to open country details. Click an event to show its security assessment and related news.
+- Layers control city miniatures, terrain, events, labels and policy connections. Connections start hidden; selecting a country isolates its links.
+- Click a connection to inspect the existing policy amount and open its target country.
 
-The world view highlights civil wars, major insurgencies, coups and revolutions. Zooming in or focusing a country reveals minor unrest and multiple events. Selected or hovered conflict smoke drifts gently at detail zoom; Reduced motion disables that movement. Rendering updates are throttled to 12 fps for this foreground effect; the simulation is unaffected.
+Country polygons retain islands, enclaves and holes. Pacific-edge fragments stay at their real longitudes. Grey territories are outside the 80-country simulation; they cannot receive policies. This color does not mean political neutrality.
 
-## What the map represents
+## Cities and events
 
-`EngineBridge/map_scene.py` returns detached read-only facts. Insurgency and government stability use the original country getters and thresholds. Coup/revolution flags describe the current turn and reset during the next country-development pass. Historical encyclopedia riot counts never become live events. Only the player's policy rows become links, keeping unannounced opponent plans out of the overlay.
+City miniatures now sit at geographic government-seat anchors and have English/Russian city names. Period seats include Bonn, East Berlin, Lagos, Rangoon, Abidjan and Dar es Salaam. Pretoria marks South Africa's executive seat. Coastal anchors may move less than one logical map pixel onto generalized land; metadata retains the original geographic coordinates. Upper Volta becomes Burkina Faso in the Godot country labels from 1984.
 
-The rules remain country-level. City positions are schematic interior anchors, not capitals or precise battle/protest locations. City variants illustrate architecture; they do not claim real factories, ports or local economies. The small streets are visual detail. The curved aid/trade lines represent policy relationships, not roads, supply paths or moving units. The briefings identify this distinction.
+The reusable miniature buildings, streets and trees remain original illustrative models. They do not reconstruct individual real buildings. Conflicts, insurgencies, coups and revolutions describe whole countries; their nearby capital marker does not identify a particular battle or demonstration. Aid/trade curves represent policy relationships, not roads or supply routes. Real road networks and province-level warfare are separate future features.
 
-## Models and regeneration
+`EngineBridge/map_scene.py` supplies detached, read-only facts. Government stability and insurgency use the original rules and thresholds. Coup/revolution flags describe the current turn. Historical encyclopedia riot counts do not become live events, and unannounced opponent orders are excluded from policy links. Detail zoom reveals minor unrest and multiple events; Reduced motion disables animated smoke.
 
-Six original city miniatures use Godot 3D meshes, an orthographic camera, directional lighting, shadows, streets and trees. They are baked to transparent textures for fast display on the map; the runtime does not maintain dozens of live 3D viewports. The reusable 3D baker is `godot/scripts/city_model_baker.gd`; instructions are in `godot/assets/cities/README.md`.
+## Geography, licensing and limits
 
-The terrain shader shades the existing relief image and masks it to the existing polygons. Regenerate the mask with `python3 tools/export_terrain_mask.py` after changing map geometry; this build-time tool requires Pillow. No additional geographic precision is implied by the shading.
+The reference date is **1 January 1982**. Boundaries remain this scenario's baseline during the campaign; there is no automatic redraw for later unifications or changing military control. [Historical conventions and sources](GEOGRAPHY_1982.md) explain gameplay associations, occupation and disputed territory.
 
-## Final-map direction
+The source is public-domain Natural Earth vector v5.1.2, with original historical union/split processing. Berlin linework is official open data under Datenlizenz Deutschland Zero 2.0. The Yemen division is a generalized factual trace from US government charts. Source URLs, licenses, hashes and reproducible preparation scripts are retained in [data/geography](../data/geography/README.md). No CShapes data or HOI4 assets are included.
 
-This is a 2.5D presentation prototype. The original map still enlarges some countries into separate insets and has coarse coastlines. A continuous geographic world is the recommended next foundation for a detailed HOI4-inspired landscape, with geographically positioned cities, road corridors, rivers, forests and more varied models.
+This is a generalized historical reconstruction, not a surveyed boundary atlas. The current Länder approximate the former German frontier; small 1988 Berlin exchanges are not reversed. Yemen's historically undefined northeastern frontier uses a documented drawing convention, and its outer desert border retains modern source geometry. Small modern coastline/border differences remain. These limitations are explicit rather than presenting modern geometry as an exact historical legal boundary.
 
-[Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) supplies public-domain country/admin boundaries and terrain data. A future exporter should preserve all 80 simulation IDs, explicitly reconstruct 1982 groupings such as the USSR, Yugoslavia and Czechoslovakia, handle East/West Germany and Berlin, and display unmodeled countries neutrally. Modern boundaries alone must not be labeled an accurate 1982 map. [CShapes](https://icr.ethz.ch/data/cshapes/) supplies historical geometry but uses CC BY-NC-SA terms; it is not embedded in this prototype.
+The atlas uses a continuous equirectangular projection, longitude −180…180 and latitude −60…85, with a 36.336° standard parallel. Polar areas outside the playable countries are cropped. Geometry is projected once; shared border coordinates are retained rather than independently simplifying neighboring countries.
+
+## Terrain and regeneration
+
+The old relief image has been replaced by **Natural Earth 1:50m Shaded Relief Basic v3.2.0**, derived from SRTM Plus elevation data and distributed in the public domain. It is cropped/projected to the same atlas bounds, sampled with mipmaps, and masked to the geographic land triangles. This is modern terrain shading, not a measurement of elevation in 1982 or a terrain simulation.
+
+Build-time dependencies: `shapely==2.2.0` and `pillow==12.3.0`; neither is required by the running Godot/Python game.
+
+```sh
+python tools/prepare_geography_sources.py       # fetch/check pinned Natural Earth inputs
+python tools/prepare_historical_overrides.py    # rebuild from vendored linework and factual trace
+python tools/export_geographic_map.py           # rebuild map.json and map_metadata.json
+python tools/export_geographic_terrain.py --download  # fetch/check pinned relief archive
+# When only geometry changes:
+python tools/export_terrain_mask.py
+```
+
+The source-preparation download is optional; compact verified vectors are vendored. Terrain regeneration can instead use `--source-archive /path/to/SR_50M.zip`. Normal packaging uses committed assets and does not download geography. `tools/export_godot_assets.py` delegates to the geographic exporter, so it cannot restore the old inset geometry inadvertently.
+
+Original city miniatures are baked with `godot/scripts/city_model_baker.gd`; see [model instructions](../godot/assets/cities/README.md). The visual reference remains layered terrain and readable city/event details, not copied artwork from another game.
 
 ## Validation
 
-`tests/test_map_scene.py` checks actual-world data, exact insurgency thresholds, read-only world/RNG invariants and hidden-opponent policy exclusion. Seed 27 naturally produces all five event families for isolated visual QA. `tests/test_map_scene_ui.py` exercises actual Godot drawing/input, city/event/route picking, zoom anchoring, layer hiding, reduced motion and English/Russian briefings. The existing campaign, multiplayer and desktop smoke suites remain applicable.
+Geometry tests check all 80 IDs, historic city probes, Berlin and Yemen divisions, valid holes/triangles, shared-border overlap and total land coverage. Raster checks verify independently known land/water locations and provenance hashes. Real Godot input tests select every modeled country from its mesh, exclude neutral land and holes, check both date-line edges, and verify capital focus and fit bounds. Existing tests cover city/event/connection picking, news actions, English/Russian briefings, reduced motion, campaigns and multiplayer.
 
-Local validation: 137 tests pass; real source rendering and marker briefings were inspected at 1280×800 and 1024×768. Build into a separate directory if another game copy is running, for example `python3 tools/build_godot.py --platform linux --output-root dist-godot-map`.
+Graphical inspection covers English/Russian world and detail views at 1280 and 1024 widths. Use a separate build directory while another version is running, for example `python tools/build_godot.py --platform linux --output-root dist-godot-geography`.

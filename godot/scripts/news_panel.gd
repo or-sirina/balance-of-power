@@ -27,17 +27,22 @@ class CountryShape extends Control:
   for y in range(16, int(size.y), 32):
    draw_line(Vector2(0, y), Vector2(size.x, y), Color("244958"))
   if shapes.is_empty(): return
-  var bounds := Rect2(shapes[0][0], Vector2.ZERO)
-  for points in shapes:
-   for point in points: bounds = bounds.expand(point)
+  var bounds := Rect2(shapes[0].points[0], Vector2.ZERO)
+  for polygon in shapes:
+   for point in polygon.points: bounds = bounds.expand(point)
   var scale_factor := minf((size.x - 40) / maxf(bounds.size.x, 1), (size.y - 30) / maxf(bounds.size.y, 1))
-  for points in shapes:
-   var transformed := PackedVector2Array()
-   for point in points: transformed.append((point - bounds.get_center()) * scale_factor + size / 2)
-   if transformed.size() > 2:
-    draw_colored_polygon(transformed, Color("497a88"))
-    transformed.append(transformed[0])
-    draw_polyline(transformed, Color("9cc5c9"), 1.5, true)
+  for polygon in shapes:
+   var vertices := PackedVector2Array()
+   for point in polygon.vertices: vertices.append((point-bounds.get_center())*scale_factor+size/2)
+   RenderingServer.canvas_item_add_triangle_array(get_canvas_item(),polygon.indices,vertices,PackedColorArray([Color("497a88")]))
+   var rings: Array = [polygon.points]
+   rings.append_array(polygon.holes)
+   for ring in rings:
+    var outline := PackedVector2Array()
+    for point in ring: outline.append((point-bounds.get_center())*scale_factor+size/2)
+    if outline.size() > 2:
+     outline.append(outline[0])
+     draw_polyline(outline,Color("9cc5c9"),1.5,true)
 
 func word(en: String, ru: String) -> String:
  return ru if L.language == "ru" else en
@@ -194,7 +199,7 @@ func _render_article() -> void:
   shape.custom_minimum_size = Vector2(150, 100)
   shape.mouse_filter = Control.MOUSE_FILTER_IGNORE
   for polygon in host.map_view.polygons:
-   if int(polygon.id) == country: shape.shapes.append(polygon.points)
+   if int(polygon.id) == country: shape.shapes.append(polygon)
   geo.add_child(shape)
   var location := VBoxContainer.new()
   location.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -255,8 +260,5 @@ func _open_country(country: int, report: bool, expected_story: String = "") -> v
   else:
    hide()
    host.country_drawer.hide()
-   host.map_view.zoom = maxf(host.map_view.zoom, 3.2)
-   host.map_view.pan = Vector2.ZERO
-   host.map_view.pan += host.map_view.size / 2 - host.map_view.transform_map() * host.map_view.country_anchor(country)
-   host.map_view.queue_redraw()
+   host.map_view.focus_country(country)
  )

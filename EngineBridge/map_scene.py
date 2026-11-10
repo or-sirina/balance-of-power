@@ -60,7 +60,7 @@ def build_map_scene(world):
                            "value_label_ru": step_ru(action, step), "source": "human_policy"})
     return {"version": 1, "year": world.year, "countries": countries,
             "events": events, "routes": routes,
-            "geography": "illustrative_country_anchors",
+            "geography": "historical_1982_capital_anchors",
             "route_semantics": "policy_relationships",
             "notice": "Country-level status; illustrative links, not roads or troop movements.",
             "notice_ru": "Состояние стран; условные связи, не дороги и не перемещения войск."}

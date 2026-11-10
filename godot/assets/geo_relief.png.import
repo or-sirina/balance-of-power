@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bubgdpt11pml3"
-path="res://.godot/imported/terrain_mask.png-8d46ef788e1dd1a3b66d0bd9ae4a0f29.ctex"
+uid="uid://dub50x6wgsacq"
+path="res://.godot/imported/geo_relief.png-3cd793e557b5d0c8a3b3e0b6d83681f3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/terrain_mask.png"
-dest_files=["res://.godot/imported/terrain_mask.png-8d46ef788e1dd1a3b66d0bd9ae4a0f29.ctex"]
+source_file="res://assets/geo_relief.png"
+dest_files=["res://.godot/imported/geo_relief.png-3cd793e557b5d0c8a3b3e0b6d83681f3.ctex"]
 
 [params]
 
@@ -23,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

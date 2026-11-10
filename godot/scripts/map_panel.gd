@@ -27,7 +27,7 @@ static func show_layers(host: Control) -> void:
  column.add_child(terrain)
  column.add_child(host._label(word("Wheel: zoom · Middle drag: move · Double-click: focus · F: whole map", "Колесо: масштаб · Средняя кнопка: перемещение · Двойной щелчок: приблизить · F: вся карта"), 14, host.MUTED, true))
  column.add_child(host._label(word("The world view highlights major developments. Zoom in to see minor unrest and all events.", "На общей карте выделены главные события. Приблизьте карту, чтобы увидеть небольшие волнения и остальные события."), 14, host.MUTED, true))
- column.add_child(host._label(word("Cities and streets illustrate each country. Connections show your aid, intervention and trade policies. Select a country to isolate its links.", "Города и улицы обозначают страны. Связи показывают вашу помощь, вмешательство и торговую политику. Выберите страну, чтобы оставить только её связи."), 14, host.MUTED, true))
+ column.add_child(host._label(word("1982 map. Cities mark government seats; grey land is outside the simulation. Connections show your aid, intervention and trade policies. Select a country to isolate its links.", "Карта 1982 года. Города отмечают резиденции правительств; серые территории не участвуют в симуляции. Связи показывают помощь, вмешательство и торговую политику. Выберите страну, чтобы оставить только её связи."), 14, host.MUTED, true))
 
 static func country_status(host: Control, country_id: int) -> Dictionary:
  for row in host.state.get("map_scene", {}).get("countries", []):
@@ -77,7 +77,7 @@ static func show_event(host: Control, country_id: int, event: Dictionary) -> voi
   count += 1
   if count == 4: break
  if count == 0: news.add_child(host._label(word("No related dispatches this turn.", "Связанных донесений в этом ходе нет."), 14, host.MUTED, true))
- column.add_child(host._label(word("The marker describes the country as a whole; its city placement is illustrative.", "Значок относится ко всей стране; положение городской модели условное."), 13, host.MUTED, true))
+ column.add_child(host._label(word("The marker describes the country as a whole. Its government-seat anchor does not locate the fighting or protests.", "Значок относится ко всей стране. Привязка к резиденции правительства не указывает место боёв или протестов."), 13, host.MUTED, true))
  var window: Window = host.popup
  column.add_child(host._button(word("Open country", "Открыть страну"), func(): window.hide(); window.queue_free(); host._select_country(country_id)))
 

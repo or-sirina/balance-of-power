@@ -1,0 +1,27 @@
+{
+  "berlin": {
+    "catalog": "https://daten.berlin.de/datensaetze/verlauf-der-berliner-mauer-1989-wfs-3dcda64c",
+    "license": "https://www.govdata.de/dl-de/zero-2-0",
+    "endpoint": "https://gdi.berlin.de/services/wfs/berlinermauer",
+    "request_template": "?service=WFS&version=2.0.0&request=GetFeature&typeNames=berlinermauer:{layer}&outputFormat=application/json&srsName=EPSG:4326",
+    "files": [
+      {
+        "file": "berlin_1989_a_grenzmauer.geojson.gz",
+        "sha256": "03b4dc5496d5b6bec9d32e0cec39ae51df7ec2052e9f19e61f5ab95d1f8c7061"
+      },
+      {
+        "file": "berlin_1989_c_politischegrenze.geojson.gz",
+        "sha256": "d8a1256685f2a8efefd8c1e54b80d8f62311614ad9e690d0b545f4868d3cccfd"
+      }
+    ]
+  },
+  "yemen": {
+    "source": "U.S. Defense Mapping Agency Aerospace Center, Operational Navigation Chart K-6, edition 4",
+    "url": "https://maps.lib.utexas.edu/maps/onc/txu-pclmaps-oclc-8322829_k_6.jpg",
+    "sha256": "7163466c2e19d459b359dc47948c223bfdd7189e26fa639657ab9b7ae0e548ba",
+    "supporting_northern_sheet": "https://maps.lib.utexas.edu/maps/onc/txu-pclmaps-oclc-8322829_j_6.jpg",
+    "supporting_sha256": "578909c53b15d942973e6b38ca10b13b89a12c678e47d69ff9154ce836e8fd78",
+    "license": "Public domain US federal government work; only an original factual generalized trace is distributed.",
+    "note": "Indefinite/undefined northeast frontiers on original chart; no exact legal delimitation claimed."
+  }
+}

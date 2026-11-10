@@ -1,11 +1,11 @@
 shader_type canvas_item;
 render_mode blend_mul, unshaded;
 
-uniform sampler2D land_mask : filter_nearest;
+uniform sampler2D land_mask : filter_linear_mipmap;
 
 void fragment() {
- // Original relief image supplies the terrain. Neighbour samples emphasize
- // its existing ridges without inventing elevation or strategic information.
+ // Georeferenced Natural Earth shaded relief supplies the terrain. Neighbour
+ // samples emphasize existing ridges; shading is not a simulation of elevation.
  float height = dot(texture(TEXTURE, UV).rgb, vec3(11.0,16.0,5.0))/32.0;
  vec2 texel = TEXTURE_PIXEL_SIZE * 1.5;
  float west = dot(texture(TEXTURE, UV - vec2(texel.x, 0.0)).rgb, vec3(11.0,16.0,5.0))/32.0;

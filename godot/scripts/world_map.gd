@@ -11,6 +11,9 @@ signal city_hovered(city: Dictionary)
 const CityModels = preload("res://scripts/city_models.gd")
 var map_state: Dictionary = {}
 var anchor_cache: Dictionary = {}
+var geography: Dictionary = {}
+var map_dimensions := Vector2(1200, 600)
+const MAX_ZOOM := 24.0
 var cities: Array = []
 var routes: Array = []
 var map_events: Array = []
@@ -76,11 +79,14 @@ func _ready() -> void:
  safe_colors = JSON.parse_string(FileAccess.get_file_as_string("res://assets/color_safe.json"))
  relief_layer = TextureRect.new()
  relief_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
- relief_layer.texture = preload("res://assets/relief_source.png")
+ relief_layer.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+ if ResourceLoader.exists("res://assets/geo_relief.png"):
+  relief_layer.texture = load("res://assets/geo_relief.png")
  relief_layer.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
  var shade := ShaderMaterial.new()
  shade.shader = preload("res://scripts/relief.gdshader")
- shade.set_shader_parameter("land_mask", preload("res://assets/terrain_mask.png"))
+ if ResourceLoader.exists("res://assets/geo_terrain_mask.png"):
+  shade.set_shader_parameter("land_mask", load("res://assets/geo_terrain_mask.png"))
  relief_layer.material = shade
  add_child(relief_layer)
  foreground = Foreground.new()
@@ -88,6 +94,9 @@ func _ready() -> void:
  foreground.mouse_filter = Control.MOUSE_FILTER_IGNORE
  foreground.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
  add_child(foreground)
+ if FileAccess.file_exists("res://assets/map_metadata.json"):
+  geography = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map_metadata.json"))
+  map_dimensions = Vector2(float(geography.get("width",1200)),float(geography.get("height",600)))
  var data: Array = JSON.parse_string(FileAccess.get_file_as_string("res://assets/map.json"))
  for entry in data:
   var points := PackedVector2Array()
@@ -101,7 +110,12 @@ func _ready() -> void:
     vertices.append(Vector2(point[0], point[1]))
   var outline := points.duplicate()
   if not points.is_empty(): outline.append(points[0])
-  polygons.append({"id": int(entry.id), "points": points, "vertices": vertices, "indices": indices, "outline": outline})
+  var holes: Array = []
+  for ring in entry.get("holes", []):
+   var hole := PackedVector2Array()
+   for point in ring: hole.append(Vector2(point[0],point[1]))
+   holes.append(hole)
+  polygons.append({"id": int(entry.id), "points": points, "holes": holes, "vertices": vertices, "indices": indices, "outline": outline})
  resized.connect(queue_redraw)
  mouse_exited.connect(func(): hovered = -1; hovered_city.clear(); hovered_route.clear(); queue_redraw())
 
@@ -140,11 +154,12 @@ func fit_map() -> void:
  queue_redraw()
 
 func transform_map() -> Transform2D:
- var scale_value := minf(size.x / 960.0, size.y / 490.0) * 0.95 * zoom
- var offset := (size - Vector2(948, 483) * scale_value) / 2.0 + pan
+ var scale_value := minf(size.x / map_dimensions.x, size.y / map_dimensions.y) * 0.95 * zoom
+ var offset := (size - map_dimensions * scale_value) / 2.0 + pan
  return Transform2D(0, Vector2.ONE * scale_value, 0, offset)
 
 func tint(id: int) -> Color:
+ if id < 0: return Color("8c998b")
  if report_values.has(id):
   var exact := presentation_color(str(report_values[id].get("color", "#babba4")))
   return exact.lightened(0.13) if id == hovered else exact
@@ -153,7 +168,7 @@ func tint(id: int) -> Color:
  if id == 1:
   return presentation_color("#ad6863")
  var base := Color("babba4")
- if id < countries.size():
+ if id >= 0 and id < countries.size():
   var c: Dictionary = countries[id]
   if mode == 1:
    return Color("617f82").lerp(Color("e7d2a5"), clampf(float(c.get("prestige", 0)) / 130.0, 0, 1))
@@ -173,16 +188,15 @@ func _draw() -> void:
  var transform := transform_map()
  draw_set_transform_matrix(transform)
  var line_width := 1.0 / transform.get_scale().x
- for x in range(0, 949, 79):
-  draw_line(Vector2(x, 0), Vector2(x, 483), Color(0.55, 0.7, 0.77, 0.07), line_width)
- for y in range(0, 484, 69):
-  draw_line(Vector2(0, y), Vector2(948, y), Color(0.55, 0.7, 0.77, 0.07), line_width)
- # A lowered coastline face gives the map a physical edge.
- for polygon in polygons:
-  if polygon.points.size() >= 3:
-   var lowered: PackedVector2Array = polygon.vertices.duplicate()
-   for k in range(lowered.size()): lowered[k] += Vector2(0, 2.8)
-   RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), polygon.indices, lowered, PackedColorArray([Color("172b32")]))
+ # Graticule follows the geography's actual longitude/latitude bounds.
+ var bounds: Array = geography.get("bounds",[-180,-60,180,85])
+ for longitude in range(-180,181,30):
+  var x := (float(longitude)-float(bounds[0]))/(float(bounds[2])-float(bounds[0]))*map_dimensions.x
+  draw_line(Vector2(x,0),Vector2(x,map_dimensions.y),Color(0.55,0.7,0.77,0.10),line_width)
+ for latitude in range(-60,91,30):
+  if latitude < float(bounds[1]) or latitude > float(bounds[3]): continue
+  var y := (float(bounds[3])-float(latitude))/(float(bounds[3])-float(bounds[1]))*map_dimensions.y
+  draw_line(Vector2(0,y),Vector2(map_dimensions.x,y),Color(0.55,0.7,0.77,0.10),line_width)
  for polygon in polygons:
   var points: PackedVector2Array = polygon.points
   if points.size() < 3:
@@ -190,10 +204,14 @@ func _draw() -> void:
   var fill := tint(polygon.id)
   RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), polygon.indices, polygon.vertices, PackedColorArray([fill]))
   draw_polyline(polygon.outline, Color("365061"), line_width * 0.7, true)
+  for ring in polygon.holes:
+   var closed: PackedVector2Array = ring.duplicate()
+   if not closed.is_empty(): closed.append(closed[0])
+   draw_polyline(closed,Color("365061"),line_width*0.7,true)
  if is_instance_valid(relief_layer):
-  relief_layer.visible = relief_enabled
+  relief_layer.visible = relief_enabled and relief_layer.texture != null
   relief_layer.position = transform.origin
-  relief_layer.size = Vector2(948, 483) * transform.get_scale()
+  relief_layer.size = map_dimensions * transform.get_scale()
  if is_instance_valid(foreground): foreground.queue_redraw()
 
 func draw_foreground(surface: Control) -> void:
@@ -201,8 +219,12 @@ func draw_foreground(surface: Control) -> void:
  surface.draw_set_transform_matrix(transform)
  var line_width := 1.0 / transform.get_scale().x
  for polygon in polygons:
-  if polygon.id == selected and polygon.points.size() >= 3:
+  if selected >= 0 and polygon.id == selected and polygon.points.size() >= 3:
    surface.draw_polyline(polygon.outline, Color("f4df9d"), line_width * (2.4 + selection_glow * 2.5), true)
+   for ring in polygon.holes:
+    var closed: PackedVector2Array = ring.duplicate()
+    if not closed.is_empty(): closed.append(closed[0])
+    surface.draw_polyline(closed,Color("f4df9d"),line_width*2.4,true)
  surface.draw_set_transform_matrix(Transform2D.IDENTITY)
  draw_living_map(surface, transform)
  var font := ThemeDB.fallback_font
@@ -210,7 +232,9 @@ func draw_foreground(surface: Control) -> void:
   var label := L.country(hovered) if hovered >= 0 else ""
   var country_status := scene_country(hovered)
   if not hovered_city.is_empty():
-   label += " · " + ("Условная городская модель" if L.language == "ru" else "Illustrative city model")
+   var city_name := str(hovered_city.get("name_ru",hovered_city.get("name",""))) if L.language == "ru" else str(hovered_city.get("name",""))
+   label = city_name + " · " + L.country(hovered)
+   label += " · " + ("События относятся к стране" if L.language == "ru" else "Events represent the country")
   if not country_status.is_empty():
    label += " · " + str(country_status.get("insurgency_label_ru" if L.language == "ru" else "insurgency_label", ""))
   if report_values.has(hovered):
@@ -235,7 +259,12 @@ func hit(position: Vector2) -> int:
  var map_point := transform_map().affine_inverse() * position
  for i in range(polygons.size() - 1, -1, -1):
   if Geometry2D.is_point_in_polygon(map_point, polygons[i].points):
-   return polygons[i].id
+   var in_hole := false
+   for ring in polygons[i].holes:
+    if Geometry2D.is_point_in_polygon(map_point,ring):
+     in_hole = true
+     break
+   if not in_hole: return maxi(-1,int(polygons[i].id))
  return -1
 
 func _gui_input(event: InputEvent) -> void:
@@ -275,13 +304,10 @@ func _gui_input(event: InputEvent) -> void:
    if country >= 0:
     country_selected.emit(country)
     if event.double_click:
-     zoom = maxf(zoom,3.2)
-     pan = Vector2.ZERO
-     pan += size/2.0 - transform_map()*country_anchor(country)
-     queue_redraw()
+     focus_country(country)
   elif event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
    var before: Vector2 = transform_map().affine_inverse() * event.position
-   zoom = clampf(zoom * (1.16 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 0.86), 1.0, 9.0)
+   zoom = clampf(zoom * (1.16 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 0.86), 1.0, MAX_ZOOM)
    pan += event.position - transform_map() * before
    queue_redraw()
   accept_event()
@@ -291,7 +317,7 @@ func _gui_input(event: InputEvent) -> void:
    accept_event()
   elif event.keycode in [KEY_PLUS, KEY_EQUAL, KEY_MINUS]:
    var center := transform_map().affine_inverse()*(size/2.0)
-   zoom = clampf(zoom*(0.86 if event.keycode == KEY_MINUS else 1.16),1.0,9.0)
+   zoom = clampf(zoom*(0.86 if event.keycode == KEY_MINUS else 1.16),1.0,MAX_ZOOM)
    pan += size/2.0-transform_map()*center
    queue_redraw()
    accept_event()
@@ -300,8 +326,31 @@ func _gui_input(event: InputEvent) -> void:
    country_selected.emit(next)
    accept_event()
 
+func focus_country(id: int) -> void:
+ var anchor := country_anchor(id)
+ var extent := Vector2(100,70)
+ # Focus the capital's landmass; overseas territories and date-line fragments
+ # must not force a small country back out to a whole-world view.
+ for polygon in polygons:
+  if int(polygon.id) != id or not Geometry2D.is_point_in_polygon(anchor,polygon.points): continue
+  var bounds := Rect2(polygon.points[0],Vector2.ZERO)
+  for point in polygon.points: bounds = bounds.expand(point)
+  extent = bounds.size
+  break
+ var fit_scale := minf(size.x/map_dimensions.x,size.y/map_dimensions.y)*0.95
+ var target := minf(size.x/maxf(extent.x,12.0),size.y/maxf(extent.y,10.0))*0.65/fit_scale
+ zoom = clampf(maxf(3.2,target),1.0,MAX_ZOOM)
+ pan = Vector2.ZERO
+ pan = size/2.0-transform_map()*anchor
+ queue_redraw()
+
 func country_anchor(id: int) -> Vector2:
  if anchor_cache.has(id): return anchor_cache[id]
+ var anchors: Dictionary = geography.get("anchors",{})
+ if anchors.has(str(id)):
+  var point: Array = anchors[str(id)]
+  anchor_cache[id] = Vector2(float(point[0]),float(point[1]))
+  return anchor_cache[id]
  # Largest interior triangle is robust for concave and island countries.
  var best := Vector2.ZERO
  var area := -1.0
@@ -329,6 +378,13 @@ func scene_country(id: int) -> Dictionary:
   if int(row.get("id", -1)) == id: return row
  return {}
 
+func capital_city(id: int, source: Dictionary = {}) -> Dictionary:
+ var city := source.duplicate()
+ var capital: Dictionary = geography.get("capitals",{}).get(str(id),{})
+ var anchor := country_anchor(id)
+ city.merge({"id":id,"country_id":id,"x":anchor.x,"y":anchor.y,"name":capital.get("name",L.country(id)),"name_ru":capital.get("name_ru",capital.get("name",L.country(id))),"schematic":false,"location_semantics":"capital_anchor"},true)
+ return city
+
 func draw_living_map(surface: Control, transform: Transform2D) -> void:
  var font := ThemeDB.fallback_font
  var local_cities: Array = cities
@@ -336,8 +392,7 @@ func draw_living_map(surface: Control, transform: Transform2D) -> void:
   local_cities = []
   for row in countries:
    var id := int(row.get("id", local_cities.size()))
-   var anchor := country_anchor(id)
-   local_cities.append({"id":id,"country_id":id,"x":anchor.x,"y":anchor.y,"name":L.country(id),"schematic":true})
+   local_cities.append(capital_city(id))
  route_hit_regions.clear()
  if layers.get("roads",true):
   for route in grouped_routes():
@@ -364,14 +419,15 @@ func draw_living_map(surface: Control, transform: Transform2D) -> void:
  var unit := clampf(0.50+zoom*0.14,0.64,1.75)
  var occupied: Array[Rect2] = []
  # Labels use screen coordinates to remain readable through zoom.
- for city in local_cities:
-  var id := int(city.get("country_id",city.get("id",0)))
-  var at := transform * Vector2(float(city.get("x",0)),float(city.get("y",0)))
+ for source_city in local_cities:
+  var id := int(source_city.get("country_id",source_city.get("id",0)))
+  var city := capital_city(id,source_city)
+  var at := transform * country_anchor(id)
   if not Rect2(Vector2(-50,-50),size+Vector2(100,100)).has_point(at): continue
   var important := id == selected or id == hovered or id < 2
   var status := scene_country(id)
   var active := int(status.get("insurgency",6)) <= 2 or int(status.get("event",0)) > 0
-  if layers.get("cities",true) and (zoom >= 1.7 or important or id % 3 == 0):
+  if layers.get("cities",true) and (zoom >= 1.7 or important):
    CityModels.draw_city(surface,at,unit,id,id < 2,active)
    city_hit_regions.append({"rect":Rect2(at+Vector2(-18,-27)*unit,Vector2(37,39)*unit),"city":city})
   if layers.get("labels",true) and (zoom >= 2.8 or important):

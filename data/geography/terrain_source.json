@@ -1,0 +1,28 @@
+{
+  "name": "Natural Earth 1:50m Shaded Relief Basic",
+  "version": "3.2.0",
+  "url": "https://naturalearth.s3.amazonaws.com/50m_raster/SR_50M.zip",
+  "sha256": "ff810f5f2747463fd8ffa612b23e5f5e5d593a345218976872b6749610976ab7",
+  "source_size": [
+    10800,
+    5400
+  ],
+  "license": "Public domain",
+  "license_url": "https://www.naturalearthdata.com/about/terms-of-use/",
+  "description_url": "https://www.naturalearthdata.com/downloads/50m-raster-data/50m-shaded-relief/",
+  "bounds": [
+    -180,
+    -60,
+    180,
+    85
+  ],
+  "output_size": [
+    4800,
+    2400
+  ],
+  "method": "Crop WGS84 global plate carree raster to map bounds; resample to atlas projection; mask with exported land triangles.",
+  "outputs": {
+    "geo_relief.png": "fd8edb4cacb5c591e91784dc2d8afe22b8b311320d9994ed77612492581c6252",
+    "geo_terrain_mask.png": "1e1ed58e740b3139227b74ab587c4da61ee05c5380e1c1ff2f0bd901fe6ab2ae"
+  }
+}

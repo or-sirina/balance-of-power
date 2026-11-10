@@ -112,6 +112,10 @@ def main():
         shutil.copy2(source, credits / (source.parent.name + '-' + source.name))
     shutil.copy2(ROOT / 'godot/assets/ATTRIBUTION.md', credits / 'GAME-ASSETS.md')
     shutil.copy2(ROOT / 'godot/assets/cities/README.md', credits / 'CITY-MODELS.md')
+    shutil.copy2(ROOT / 'data/geography/README.md', credits / 'GEOGRAPHIC-DATA.md')
+    shutil.copy2(ROOT / 'docs/GEOGRAPHY_1982.md', credits / 'HISTORICAL-GEOGRAPHY.md')
+    for name in ('sources.json', 'historical_sources.json', 'terrain_source.json'):
+        shutil.copy2(ROOT / 'data/geography' / name, credits / ('geography-' + name))
     for name in ('GODOT-LICENSE.txt', 'GODOT-COPYRIGHT.txt'):
         shutil.copy2(ROOT / 'packaging/godot' / name, credits / name)
     pyinstaller = importlib.metadata.distribution('pyinstaller')

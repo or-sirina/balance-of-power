@@ -1,0 +1,23 @@
+[
+  {
+    "file": "ne_50m_admin_0_map_units.geojson.gz",
+    "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_admin_0_map_units.geojson",
+    "upstream_sha256": "b8d421aca6e9e08e8cdf09cc26af111cc3e0deba4fe915611d58ade71e8a4db0",
+    "sha256": "8d7056de81195fe660d05a2b2fce63015d9c1c738c169856d833413dc307a8c9",
+    "filter": "all map units; compact properties"
+  },
+  {
+    "file": "ne_10m_admin_1_states_provinces.geojson.gz",
+    "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_1_states_provinces.geojson",
+    "upstream_sha256": "22d0e3ad85eb3e27f17cabf8ba2d50e554fbc27a87796ff891d958185da62fb5",
+    "sha256": "dae6348a60af0ff634b72a377c07ab5060cb4340ef2855d367040afe25cf7a26",
+    "filter": "DEU,YEM admin1; compact properties"
+  },
+  {
+    "file": "ne_50m_populated_places.geojson.gz",
+    "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_populated_places.geojson",
+    "upstream_sha256": "da4662b7bbfeb897d02f228c5839131dce27acff5717630f91ccff4f67828ee7",
+    "sha256": "a41f2ebf5bf141131d0675f2ae955178f25fb2ffefb3e3ac488cf5b864adf562",
+    "filter": "compact properties; capitals only"
+  }
+]
