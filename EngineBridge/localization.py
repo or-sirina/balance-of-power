@@ -68,7 +68,7 @@ def step_ru(action, step):
 
 
 def historical_key(news):
-    if news.action != WORLD_EVENT:
+    if getattr(news, "source", None) == "ai_generated" or news.action != WORLD_EVENT:
         return None
     from GameLogic.HistoricalEvents import EVENTS
     text = getattr(news, "customText", None) or news.text
@@ -81,6 +81,8 @@ def historical_key(news):
 
 
 def type_ru(news):
+    if getattr(news, "source", None) == "ai_generated" and news.action == WORLD_EVENT:
+        return "Событие ИИ"
     if news.action == WORLD_EVENT:
         return "Историческое событие"
     if news.actor.id == news.target.id:
@@ -92,7 +94,32 @@ def type_ru(news):
     return POLICIES_RU[news.action] if 0 <= news.action <= 8 else "Событие"
 
 
+def gm_news_text(news, ru=False):
+    """Localized synthetic report, with engine-authored mechanical context."""
+    headline = getattr(news, 'gmHeadlineRu' if ru else 'gmHeadline', '')
+    prefix = '[Создано ИИ] ' if ru else '[AI-generated] '
+    kind = getattr(news, 'gmKind', '')
+    old = getattr(news, 'gmEffectOld', news.old)
+    new = getattr(news, 'gmEffectNew', news.new)
+    labels = {'unrest': ('Government popularity', 'Популярность правительства'),
+              'economic_shock': ('Economic output', 'Объём экономики'),
+              'diplomatic_incident': ('Diplomatic relations', 'Дипломатические отношения')}
+    if kind in labels:
+        effect = '%s: %s → %s.' % (labels[kind][int(ru)], old, new)
+    elif 0 <= news.action <= 8:
+        label = POLICIES_RU[news.action] if ru else Local.strings[Local.LABEL_POLICY][news.action]
+        before = step_ru(news.action, news.old) if ru else news.getActionValue(True)
+        after = step_ru(news.action, news.new) if ru else news.getActionValue(False)
+        effect = '%s: %s → %s.' % (label, before, after)
+    else:
+        effect = ''
+    fiction = 'Вымышленное событие экспериментального режима.' if ru else 'Fictional event in experimental mode.'
+    return '%s%s %s %s' % (prefix, headline, effect, fiction)
+
+
 def news_ru(news):
+    if getattr(news, 'source', None) == 'ai_generated':
+        return gm_news_text(news, True)
     actor, target = country_name(news.actor.id), country_name(news.target.id)
     if news.action == WORLD_EVENT:
         key = historical_key(news)
@@ -238,6 +265,8 @@ def model_status(code, language):
 
 
 _ERRORS = {
+    "gamemaster_unavailable": "Экспериментальный ведущий доступен только в одиночной кампании.",
+    "gamemaster_disabled": "Сначала включите экспериментального ведущего ИИ.",
     "invalid_request": "Некорректный запрос к игре.", "invalid_argument": "Некорректный параметр действия.",
     "mode_unavailable": "Этот режим карты недоступен на текущем уровне сложности.",
     "duplicate_id": "Номер запроса уже использован для другого действия.",

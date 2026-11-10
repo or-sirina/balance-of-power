@@ -12,7 +12,7 @@ Configuration is resolved in this order, first match wins:
 
 1. explicit constructor arguments;
 2. environment variables (``BOP_LLM_BASE_URL``, ``BOP_LLM_MODEL``,
-   ``BOP_LLM_API_KEY``, ``OPENROUTER_API_KEY``, and the standard proxy variables);
+   ``BOP_LLM_API_KEY``, the selected provider's key variable, and standard proxies);
 3. ``llm.json`` in the per-user data directory.
 
 The API key is never written to the log and never included in an exception
@@ -33,18 +33,16 @@ import urllib.parse
 import urllib.request
 
 import Paths
+try:
+    from .LLMProviders import infer_provider, provider_preset
+except ImportError:  # legacy standalone GameLogic import
+    from LLMProviders import infer_provider, provider_preset
 
 #: OpenRouter's public endpoint.  Any OpenAI-compatible service works.
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-#: The model the fifth difficulty level uses by default.
-#:
-#: ``typesafe/jev-1.13`` is an *unlisted* OpenRouter model: the page exists, but
-#: it is absent from the public ``/api/v1/models`` catalogue and returns 404 to
-#: an unauthenticated request, so it only resolves for an account that has been
-#: granted access.  That is exactly why the id is a setting rather than a
-#: constant: point it at anything OpenAI-compatible, including an internal
-#: corporate model, with ``BOP_LLM_MODEL``.
-DEFAULT_MODEL = "typesafe/jev-1.13"
+#: Public text-model default. Existing saved Jev decisions configurations retain
+#: their model and backend; a fresh setup does not require unlisted-model access.
+DEFAULT_MODEL = "qwen/qwen3.8-27b"
 #: Local, deterministic stand-in used when there is no network or no key.
 MOCK_MODEL = "mock/heuristic"
 
@@ -554,7 +552,7 @@ class LLMConfig(object):
     def __init__(self, base_url=None, model=None, api_key=None, temperature=None,
                  max_tokens=None, timeout=None, offline=None,
                  fallback_models=None, max_requests=None, backend=None,
-                 chat_model=None, disable_reasoning=None):
+                 chat_model=None, disable_reasoning=None, provider=None, gamemaster_model=None):
         # Every numeric and boolean default is ``None`` meaning "use the saved
         # value, else the built-in one".  A concrete default here would always
         # win over ``llm.json`` and the settings window would save values that
@@ -562,16 +560,39 @@ class LLMConfig(object):
         stored = self._load_stored()
         # Values pasted from a .bat/.ps1 file or a web page often carry a
         # trailing CR/LF or space, which breaks the URL or the header.
-        self.base_url = _clean(base_url or os.environ.get("BOP_LLM_BASE_URL")
-                               or stored.get("base_url") or DEFAULT_BASE_URL
-                               ).rstrip("/")
-        self.model = _clean(model or os.environ.get("BOP_LLM_MODEL")
-                            or stored.get("model") or DEFAULT_MODEL)
-        #: A key that came from the environment.  ``save`` must not copy it into
-        #: ``llm.json``: the file outlives the shell session that exported it.
-        self._env_key = _clean(os.environ.get("BOP_LLM_API_KEY")
-                               or os.environ.get("OPENROUTER_API_KEY") or "")
-        self.api_key = _clean(api_key or self._env_key or stored.get("api_key") or "")
+        selected = provider or os.environ.get("BOP_LLM_PROVIDER")
+        endpoint = base_url or os.environ.get("BOP_LLM_BASE_URL")
+        if not selected:
+            selected = infer_provider(endpoint) if endpoint else stored.get("provider")
+        self.provider = selected or infer_provider(stored.get("base_url") or DEFAULT_BASE_URL)
+        profiles = stored.get("provider_profiles", {})
+        profile = profiles.get(self.provider, {}) if isinstance(profiles, dict) else {}
+        if isinstance(profile, dict) and profile:
+            profile = dict(profile)
+            profile.setdefault("fallback_models", [])
+            profile.setdefault("backend", "auto")
+            stored = dict(stored, **profile)
+            stored["provider"] = self.provider
+        preset = provider_preset(self.provider)
+        self.provider = preset["id"]
+        same = self.provider == (stored.get("provider") or infer_provider(stored.get("base_url") or DEFAULT_BASE_URL))
+        self.base_url = _clean(endpoint or (stored.get("base_url") if same else None)
+                               or preset["base_url"] or DEFAULT_BASE_URL).rstrip("/")
+        self.model = _clean(model or os.environ.get("BOP_LLM_MODEL") or
+            (stored.get("model") if same else None) or
+            preset["default_model"])
+        # A provider label alone does not authorize forwarding its environment
+        # credential to an edited gateway URL. Only the known HTTPS hosts do.
+        endpoint_parts = urllib.parse.urlsplit(self.base_url)
+        trusted_endpoint = (endpoint_parts.scheme.lower() == "https"
+                            and not endpoint_parts.username and not endpoint_parts.password
+                            and infer_provider(self.base_url) == self.provider
+                            and self.provider not in ("custom", "local"))
+        self._env_key = _clean(os.environ.get("BOP_LLM_API_KEY") or
+            (os.environ.get(preset["api_key_env"]) if preset["api_key_env"] and trusted_endpoint else "") or "")
+        saved_endpoint = (stored.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
+        saved_key = stored.get("api_key") if same and saved_endpoint == self.base_url else ""
+        self.api_key = _clean(api_key if api_key is not None else self._env_key or saved_key or "")
         self.temperature = _number(
             temperature if temperature is not None else stored.get("temperature", 0.7),
             0.7, float)
@@ -587,7 +608,7 @@ class LLMConfig(object):
         #: (like typesafe/jev-1.13) returns 404 the moment access lapses, and a
         #: game should not stall because of it.
         if fallback_models is None:
-            fallback_models = stored.get("fallback_models") or []
+            fallback_models = (stored.get("fallback_models") or []) if same else []
         self.fallback_models = [m for m in fallback_models if m and m != self.model]
         #: Hard ceiling on model calls per game, so a long session cannot run up
         #: a bill nobody agreed to.  ``None`` means "use the stored value or the
@@ -603,11 +624,16 @@ class LLMConfig(object):
         #: "decisions" for a decision model (Jev), "chat" for a text model, or
         #: "auto" to pick from the model id.  They are different APIs with
         #: different payloads; guessing wrong is a 400 from the provider.
-        self.backend = (backend or stored.get("backend") or "auto").lower()
+        self.backend = (backend or (stored.get("backend") if same else None) or "auto").lower()
         #: A text model for the advisor chat.  The opponent may be Jev, which
         #: cannot write prose at all, so the two roles need separate models.
         self.chat_model = (chat_model or os.environ.get("BOP_LLM_CHAT_MODEL")
-                           or stored.get("chat_model") or DEFAULT_CHAT_MODEL)
+                           or (stored.get("chat_model") if same else None)
+                           or preset["default_model"] or self.model)
+        self.gamemaster_model = (gamemaster_model or os.environ.get("BOP_LLM_GAMEMASTER_MODEL")
+                                 or (stored.get("gamemaster_model") if same else None) or self.chat_model)
+        if is_decision_model(self.gamemaster_model):
+            self.gamemaster_model = preset["default_model"] or DEFAULT_CHAT_MODEL
         #: Ask the provider not to run a reasoning pass.  Hybrid "thinking"
         #: models put their scratchpad in ``message.reasoning`` and the answer in
         #: ``message.content``; under a modest token budget the scratchpad eats
@@ -638,14 +664,15 @@ class LLMConfig(object):
         # ``max_requests=None`` would mean "use the default", so an unlimited
         # budget (None here) is passed as the explicit 0.  The fallbacks are the
         # opponent's; a decisions model among them cannot answer a chat request.
-        clone = LLMConfig(base_url=self.base_url, model=self.chat_model,
+        clone = LLMConfig(provider=self.provider, base_url=self.base_url, model=self.chat_model,
                           api_key=self.api_key, temperature=self.temperature,
                           max_tokens=self.max_tokens, timeout=self.timeout,
                           offline=self.offline, max_requests=self.max_requests or 0,
                           fallback_models=[m for m in self.fallback_models
                                            if not is_decision_model(m)],
                           chat_model=self.chat_model,
-                          disable_reasoning=self.disable_reasoning)
+                          disable_reasoning=self.disable_reasoning,
+                          gamemaster_model=self.gamemaster_model)
         clone.backend = "chat"
         clone.game_budget = self.game_budget
         return clone
@@ -666,8 +693,13 @@ class LLMConfig(object):
             # Supplied by the environment: keep whatever was saved before (the
             # user's own stored key, or nothing) rather than writing a secret
             # to disk that they only ever exported for one shell.
-            key = self._load_stored().get("api_key") or ""
+            previous = self._load_stored()
+            profile = previous.get("provider_profiles", {}).get(self.provider, {})
+            if not profile and (previous.get("provider") or infer_provider(previous.get("base_url") or DEFAULT_BASE_URL)) == self.provider:
+                profile = previous
+            key = profile.get("api_key", "") if profile.get("base_url", "").rstrip("/") == self.base_url else ""
         payload = {
+            "provider": self.provider,
             "base_url": self.base_url,
             "model": self.model,
             "api_key": key,
@@ -679,8 +711,14 @@ class LLMConfig(object):
             "max_requests": self.max_requests or 0,
             "backend": self.backend,
             "chat_model": self.chat_model,
+            "gamemaster_model": self.gamemaster_model,
             "disable_reasoning": bool(self.disable_reasoning),
         }
+        profiles = self._load_stored().get("provider_profiles", {})
+        profiles = dict(profiles) if isinstance(profiles, dict) else {}
+        profiles[self.provider] = {field: payload[field] for field in
+            ("base_url", "model", "chat_model", "gamemaster_model", "backend", "fallback_models", "api_key")}
+        payload["provider_profiles"] = profiles
         path = Paths.user_file(CONFIG_FILENAME)
         # Created owner-only from the first byte: writing with the default mode
         # and tightening afterwards leaves the key world-readable in between.
@@ -696,7 +734,7 @@ class LLMConfig(object):
     @property
     def usable(self):
         """True when we have enough to make a real request."""
-        return bool(self.api_key) and not self.offline
+        return (bool(self.api_key) or self.provider == "local") and not self.offline
 
     def model_chain(self):
         """The models to try, in order."""
@@ -792,32 +830,52 @@ class LLMClient(object):
         return context
 
     def _build_request(self, messages, response_format, model=None):
-        body = {
-            "model": model or self.config.model,
-            "messages": messages,
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
-        }
-        if response_format:
-            body["response_format"] = response_format
-        if getattr(self, "_send_reasoning", False):
-            # An OpenRouter extension.  A provider that does not know the field
-            # may reject the whole request, so this is sent optimistically and
-            # dropped for the rest of the game the first time that happens.
-            body["reasoning"] = {"enabled": False}
-        request = urllib.request.Request(
-            self.config.base_url + "/chat/completions",
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer %s" % self.config.api_key,
-                # OpenRouter uses these for attribution; harmless elsewhere.
-                "HTTP-Referer": "https://localhost/balance-of-power",
-                "X-Title": "Balance of Power",
-                "User-Agent": "BalanceOfPower/1.0",
-            },
-            method="POST")
-        return request
+        model = model or self.config.model
+        provider = getattr(self.config, "provider", infer_provider(self.config.base_url))
+        headers = {"Content-Type": "application/json", "User-Agent": "BalanceOfPower/1.0"}
+        if self.config.api_key:
+            headers["Authorization"] = "Bearer %s" % self.config.api_key
+        if provider == "anthropic":
+            headers["anthropic-version"] = "2026-10-21"
+            system = [m["content"] for m in messages if m.get("role") in ("system", "developer")]
+            body = {"model": model, "max_tokens": self.config.max_tokens,
+                    "messages": [m for m in messages if m.get("role") not in ("system", "developer")]}
+            if system:
+                parts = []
+                for content in system:
+                    if isinstance(content, str):
+                        parts.append({"type": "text", "text": content})
+                    elif isinstance(content, list):
+                        parts.extend(part for part in content if isinstance(part, dict)
+                                     and part.get("type") == "text")
+                body["system"] = parts
+            if response_format:
+                instruction = "Return only a valid JSON object."
+                if uses_schema(response_format):
+                    instruction += " Match this JSON schema: " + json.dumps(response_format["json_schema"]["schema"])
+                body.setdefault("system", []).append({"type": "text", "text": instruction})
+            suffix = "/messages"
+        else:
+            body = {"model": model, "messages": messages,
+                    "temperature": self.config.temperature, "max_tokens": self.config.max_tokens}
+            if provider == "openai":
+                body["max_completion_tokens"] = body.pop("max_tokens")
+                if model.lower().startswith(("o1", "o3", "o4", "gpt-5")):
+                    body.pop("temperature", None)
+            if response_format:
+                body["response_format"] = response_format
+            if getattr(self, "_send_reasoning", False):
+                if provider == "openrouter":
+                    body["reasoning"] = {"enabled": False}
+                elif provider == "deepseek":
+                    body["thinking"] = {"type": "disabled"}
+                elif provider in ("qwen", "qwen_china"):
+                    body["enable_thinking"] = False
+            if provider == "openrouter":
+                headers.update({"HTTP-Referer": "https://localhost/balance-of-power", "X-Title": "Balance of Power"})
+            suffix = "/chat/completions"
+        return urllib.request.Request(self.config.base_url + suffix,
+            data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
 
     def budget_left(self):
         """How many model calls remain this game, or None when unlimited."""
@@ -846,7 +904,7 @@ class LLMClient(object):
         """
         if self.config.offline:
             raise LLMNotConfigured("offline mode is on; no model calls are made")
-        if not self.config.api_key:
+        if not self.config.api_key and getattr(self.config, "provider", None) != "local":
             raise LLMNotConfigured("no API key configured")
         self._check_settings()
         model = model or self.config.model
@@ -884,7 +942,8 @@ class LLMClient(object):
             if effective is not None and self._schema_supported is False \
                     and uses_schema(effective):
                 effective = LOOSE_JSON
-            uses_reasoning = (self.config.disable_reasoning
+            uses_reasoning = (getattr(self.config, "provider", "custom") in ("openrouter", "deepseek", "qwen", "qwen_china")
+                              and self.config.disable_reasoning
                               and self._reasoning_supported is not False)
             self._send_reasoning = uses_reasoning
             request = self._build_request(messages, effective, model)
@@ -898,7 +957,7 @@ class LLMClient(object):
                     if _looks_html(raw, ctype):
                         raise _block_error(host, "200")
                     raise
-                text = self._extract(payload, self.config.api_key)
+                text = self._extract_provider(payload)
                 if uses_schema(effective):
                     self._schema_supported = True
                 if uses_reasoning:
@@ -959,9 +1018,9 @@ class LLMClient(object):
                 # Treating every 400 as a rejection would silently switch the
                 # setting off (and mislabel the reason) the first time a provider
                 # refused the request for some entirely different cause.
-                mentions_reasoning = "reasoning" in detail.lower()
+                mentions_reasoning = any(field in detail.lower() for field in ("reasoning", "thinking"))
                 if exc.code == 400 and self._reasoning_supported is None \
-                        and self.config.disable_reasoning and mentions_reasoning:
+                        and uses_reasoning and mentions_reasoning:
                     # The provider rejects the reasoning field.  Drop it once and
                     # remember, rather than paying for the rejection every turn.
                     self._reasoning_supported = False
@@ -1047,11 +1106,33 @@ class LLMClient(object):
         import hashlib
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
+    def _extract_provider(self, payload):
+        if getattr(self.config, "provider", None) != "anthropic":
+            return self._extract(payload, self.config.api_key)
+        if not isinstance(payload, dict) or payload.get("type") == "error":
+            raise LLMError("the provider returned no usable message")
+        if payload.get("stop_reason") == "max_tokens":
+            raise LLMError("the model exhausted its answer budget; raise Max answer tokens")
+        blocks = payload.get("content")
+        if not isinstance(blocks, list):
+            raise LLMError("unexpected response shape: content was not a list")
+        text = "".join(block.get("text", "") for block in blocks
+                       if isinstance(block, dict) and block.get("type") == "text"
+                       and isinstance(block.get("text"), str))
+        if not text.strip():
+            raise LLMError("the model returned an empty answer")
+        return text
+
     def _account(self, payload):
         """Record what the provider says the call cost in tokens."""
         usage = payload.get("usage") if isinstance(payload, dict) else None
         if not isinstance(usage, dict):
             return
+        if getattr(self.config, "provider", None) == "anthropic":
+            usage = dict(usage)
+            usage["prompt_tokens"] = usage.get("input_tokens", 0)
+            usage["completion_tokens"] = usage.get("output_tokens", 0)
+            usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
         for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
             value = usage.get(field)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -1113,6 +1194,10 @@ class LLMClient(object):
         except (KeyError, IndexError, TypeError):
             raise LLMError("unexpected response shape: %s"
                            % _redact(json.dumps(payload, default=str)[:300], secret))
+        if choices[0].get("finish_reason") == "length":
+            raise LLMError("the model exhausted its answer budget; raise Max answer tokens")
+        if choices[0].get("finish_reason") == "content_filter" or message.get("refusal"):
+            raise LLMError("the model returned no usable answer (request was rejected)")
         content = message.get("content")
         if isinstance(content, list):
             # Some providers return content as a list of parts.

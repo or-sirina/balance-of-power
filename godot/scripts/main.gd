@@ -8,6 +8,7 @@ signal network_changed(network: Dictionary)
 const L = preload("res://scripts/locale.gd")
 const WorldMap = preload("res://scripts/world_map.gd")
 const Reports = preload("res://scripts/reports.gd")
+const GameMasterPanel = preload("res://scripts/game_master_panel.gd")
 const AISettings = preload("res://scripts/ai_settings.gd")
 const AdvisorPanel = preload("res://scripts/advisor_panel.gd")
 const SoundSignals = preload("res://scripts/sound_signals.gd")
@@ -83,6 +84,7 @@ var dialogue_generation := 0
 var settings_generation := 0
 var shown_year := 0
 var shown_ending := ""
+var game_master_panel := GameMasterPanel.new()
 var ai_settings := AISettings.new()
 var advisor_panel := AdvisorPanel.new()
 var track_names := ["detente.wav", "ambient_synthwave4k.ogg", "coldwar.wav", "ambient_mindstream.ogg", "defcon.wav", "tension_wastelands.ogg"]
@@ -247,6 +249,7 @@ func _build_ui() -> void:
  header.add_child(_expand(score_label))
  header.add_child(_button("Сведения" if L.language == "ru" else "Reports", _open_reports))
  header.add_child(_button(L.text("advisor_short"), _advisor_dialog))
+ header.add_child(_button(L.text("gamemaster"), func(): game_master_panel.open(self)))
  end_button = _button(L.text("end"), func(): _command("end_turn"))
  header.add_child(end_button)
  ui.add_child(header)
@@ -420,8 +423,8 @@ func _command(command: String, args: Dictionary = {}, after: Callable = Callable
  var request := HTTPRequest.new()
  # AI settings allow 300s; the core shares a 1.5x deadline across retries.
  # The local transport must outlast that deadline and return the final state.
- var model_request := command in ["advisor", "crisis_dialogue", "load"] or (command == "new_game" and int(args.get("level", 1)) == 5) or (command in ["end_turn", "crisis_choice"] and int(state.get("level", 1)) == 5)
- request.timeout = 110.0 if command == "settings_test" else (480.0 if model_request else 30.0)
+ var model_request := command in ["advisor", "crisis_dialogue", "load", "gamemaster_generate"] or (command == "new_game" and (int(args.get("level", 1)) == 5 or bool(args.get("gamemaster_enabled", false)))) or (command in ["end_turn", "crisis_choice"] and (int(state.get("level", 1)) == 5 or bool(state.get("gamemaster", {}).get("enabled", false))))
+ request.timeout = 155.0 if command == "settings_test" else (540.0 if model_request else 30.0)
  request.use_threads = true
  add_child(request)
  var id := str(request_counter)
@@ -864,7 +867,7 @@ func _policy_dialog(policy: Dictionary) -> void:
 func _new_game_dialog() -> void:
  if busy:
   return
- var column := _dialog(L.text("new"), Vector2i(620, 450))
+ var column := _dialog(L.text("new"), Vector2i(680, 560))
  var owning_popup := popup
  column.add_child(_label(L.text("side")))
  var side := OptionButton.new()
@@ -878,8 +881,13 @@ func _new_game_dialog() -> void:
  difficulty.select(2)
  column.add_child(difficulty)
  column.add_child(_label(L.text("guide_live"), 14, MUTED, true))
+ var gamemaster := CheckBox.new()
+ gamemaster.text = L.text("gamemaster_enabled")
+ gamemaster.button_pressed = false
+ column.add_child(gamemaster)
+ column.add_child(_label(L.text("gamemaster_cost"), 14, MUTED, true))
  var start_button := _button(L.text("start"), func():
-  var args := {"side": side.selected, "level": difficulty.selected + 1, "seed": 1982 if smoke_test else int(Time.get_unix_time_from_system())}
+  var args := {"language": L.language, "gamemaster_enabled": gamemaster.button_pressed, "side": side.selected, "level": difficulty.selected + 1, "seed": 1982 if smoke_test else int(Time.get_unix_time_from_system())}
   owning_popup.queue_free()
   guide_step = 0
   _command("new_game", args, func(response):

@@ -6,6 +6,21 @@ const RU_COUNTRIES = ["США", "СССР", "Мексика", "Гондурас"
 const POLICIES_EN = ["Destabilization", "Economic aid", "Military aid", "Aid to insurgents", "Government intervention", "Rebel intervention", "Diplomatic pressure", "Treaty", "Trade"]
 const POLICIES_RU = ["Дестабилизация", "Экономическая помощь", "Военная помощь", "Помощь повстанцам", "Войска на стороне власти", "Войска на стороне повстанцев", "Дипломатическое давление", "Договор", "Торговля"]
 const STRINGS = {
+ "gamemaster": ["AI game master", "ИИ-ведущий"],
+ "gamemaster_enabled": ["Experimental AI game master (optional)", "Экспериментальный ИИ-ведущий (по желанию)"],
+ "gamemaster_help": ["Create world events from the current campaign. Events are checked against game rules before they affect countries. The game master acts once per year; ordinary simulation continues if a model is unavailable.", "Создаёт мировые события на основе текущей партии. Перед влиянием на страны события проверяются по правилам игры. Ведущий действует раз в год; при недоступности модели обычная симуляция продолжается."],
+ "gamemaster_cost": ["Uses your provider and game master model. Network calls may incur provider charges. One attempt per year, including failures.", "Использует вашего провайдера и модель ведущего. Запросы могут быть платными. Одна попытка в год, включая неудачные."],
+ "gamemaster_generate": ["Generate this year’s event", "Создать событие этого года"],
+ "gamemaster_empty": ["No game master events yet.", "Событий ведущего пока нет."],
+ "gamemaster_unsupported": ["The experimental game master is available in single-player campaigns outside training.", "Экспериментальный ведущий доступен в одиночной партии вне обучения."],
+ "gamemaster_multiplayer": ["The experimental game master is unavailable in multiplayer.", "Экспериментальный ведущий недоступен в игре вдвоём."],
+ "gamemaster_status_disabled": ["Game master is off", "Ведущий выключен"],
+ "gamemaster_status_ready": ["Ready for the next event", "Готов к следующему событию"],
+ "gamemaster_status_pending": ["Generating an event…", "Создание события…"],
+ "gamemaster_status_generating": ["Generating an event…", "Создание события…"],
+ "gamemaster_status_fallback": ["Model unavailable; ordinary simulation continues", "Модель недоступна; обычная симуляция продолжается"],
+ "gamemaster_status_generated": ["Event created", "Событие создано"],
+ "gamemaster_source": ["AI game master event", "Событие ИИ-ведущего"],
  "map_overview": ["World", "Мир"], "map_policies": ["Influence & policies", "Влияние и политика"], "map_indicators": ["Country indicators", "Показатели стран"],
  "menu": ["Menu", "Меню"], "advisor_short": ["Advisors", "Советники"], "country_short": ["Country", "Страна"],
  "settings": ["Settings", "Настройки"], "help": ["How to play", "Как играть"], "quit": ["Quit", "Выйти"],

@@ -4,6 +4,10 @@ extends RefCounted
 ## The host supplies its existing _dialog(title, size) helper and theme.
 
 const COPY = {
+ "provider": ["Provider", "Провайдер"],
+ "provider_note": ["One provider connection; choose a model for each role below. Changing provider fills its defaults and clears the entered key. Saved keys stay with their provider.", "Одно подключение к провайдеру; ниже задайте модель для каждой роли. При смене провайдера подставляются настройки и очищается ввод ключа. Сохранённые ключи остаются у своего провайдера."],
+ "gamemaster_model": ["Experimental game master model", "Модель экспериментального ведущего"],
+ "gamemaster_role": ["Game master", "Ведущий"],
  "title": ["AI settings", "Настройки ИИ"],
  "intro": ["Adaptive difficulty uses the opponent model. AI advisors use a text model. Built-in AI remains available offline.", "На адаптивном уровне играет модель соперника. ИИ-советникам нужна текстовая модель. Встроенный ИИ доступен без сети."],
  "offline": ["Use built-in AI; disable network calls", "Встроенный ИИ без сетевых запросов"],
@@ -103,6 +107,12 @@ func open(host: Control, request: Callable, language: String = "en") -> void:
  scroll.add_child(_form)
  _controls.clear()
  _check("offline", "offline")
+ _form.add_child(_label(_text("provider")))
+ var provider := OptionButton.new()
+ provider.item_selected.connect(_provider_selected)
+ _controls.provider = provider
+ _form.add_child(provider)
+ _form.add_child(_label(_text("provider_note")))
  _entry("base_url", "endpoint")
  _form.add_child(_label(_text("endpoint_note")))
  _entry("model", "model")
@@ -115,6 +125,7 @@ func open(host: Control, request: Callable, language: String = "en") -> void:
  _form.add_child(backend)
  _check("advisors_enabled", "advisors")
  _entry("chat_model", "chat_model")
+ _entry("gamemaster_model", "gamemaster_model")
  _form.add_child(_label(_text("model_note")))
  _check("reasoning", "reasoning")
  var key: LineEdit = _entry("api_key", "key")
@@ -240,7 +251,14 @@ func _reload() -> void:
 func _populate(settings: Dictionary) -> void:
  _populating = true
  _data = settings.duplicate(true)
- for name in ["base_url", "model", "chat_model"]:
+ _controls.provider.clear()
+ var catalog: Array = settings.get("provider_catalog", [{"id": "custom", "name": "Custom", "base_url": "", "default_model": ""}])
+ for item in catalog:
+  _controls.provider.add_item(str(item.get("name", item.id)))
+  _controls.provider.set_item_metadata(_controls.provider.item_count - 1, item)
+  if str(item.id) == str(settings.get("provider", "custom")):
+   _controls.provider.select(_controls.provider.item_count - 1)
+ for name in ["base_url", "model", "chat_model", "gamemaster_model"]:
   _controls[name].text = str(settings.get(name, ""))
  _controls.backend.select(maxi(0, ["auto", "chat", "decisions"].find(str(settings.get("backend", "auto")))))
  for name in ["offline", "advisors_enabled"]:
@@ -268,7 +286,8 @@ func _populate(settings: Dictionary) -> void:
 
 func _values() -> Dictionary:
  var values := {"language": _language, "expected_generation": int(_data.get("generation", -1))}
- for name in ["base_url", "model", "chat_model", "api_key"]:
+ values.provider = str(_controls.provider.get_selected_metadata().get("id", "custom"))
+ for name in ["base_url", "model", "chat_model", "gamemaster_model", "api_key"]:
   values[name] = str(_controls[name].text)
  values.backend = ["auto", "chat", "decisions"][_controls.backend.selected]
  for name in ["offline", "advisors_enabled", "clear_api_key"]:
@@ -318,8 +337,37 @@ func _test() -> void:
   var lines := PackedStringArray()
   for report in result.get("reports", []):
    var role: String = str(report.get("role", ""))
-   var caption := _text("opponent" if role == "opponent" else "advisor_role") if not role.is_empty() else ""
+   var caption := _text({"opponent": "opponent", "advisor": "advisor_role", "gamemaster": "gamemaster_role"}.get(role, "advisor_role")) if not role.is_empty() else ""
    var message := str(report.get("message_ru" if _language == "ru" else "message", _text("error")))
    lines.append((caption + ": " if not caption.is_empty() else "") + message)
   _status.text = "\n".join(lines) if not lines.is_empty() else _text("error")
+ )
+
+func _provider_selected(index: int) -> void:
+ if _populating: return
+ var provider: Dictionary = _controls.provider.get_item_metadata(index)
+ _controls.base_url.text = str(provider.get("base_url", ""))
+ for field in ["model", "chat_model", "gamemaster_model"]:
+  _controls[field].text = str(provider.get("default_model", ""))
+ _controls.backend.select(0)
+ _controls.api_key.clear()
+ _controls.clear_api_key.button_pressed = false
+ _controls.api_key.editable = true
+ _controls.api_key.placeholder_text = _text("key_add")
+ _key_status.text = _text("provider_note")
+ _edited()
+ _serial += 1
+ var serial := _serial
+ var selected_id := str(provider.get("id", "custom"))
+ _set_busy(true)
+ _status.text = _text("loading")
+ _request.call("settings_get", {"provider": selected_id}, func(response: Dictionary):
+  if not _alive(serial): return
+  _set_busy(false)
+  if response.get("ok", false) and response.get("settings") is Dictionary:
+   # Preview the selected profile without saving it or exposing its saved key.
+   _populate(response.settings)
+   _status.text = _text("edited")
+  else:
+   _status.text = _error(response)
  )

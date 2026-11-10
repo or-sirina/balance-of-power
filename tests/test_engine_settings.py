@@ -289,6 +289,73 @@ class SettingsTests(unittest.TestCase):
             self.service.run_test(prepared)
         self.assertEqual(raised.exception.code, "settings_changed")
 
+    def test_provider_preview_is_read_only_and_keys_are_scoped(self):
+        self.service.apply({'provider': 'openrouter', 'model': 'router/model', 'api_key': 'router-private'})
+        before = Path(Paths.user_file('llm.json')).read_bytes()
+        generation = self.service.generation
+        preview = self.service.get({'provider': 'openai'})
+        self.assertEqual(preview['provider'], 'openai')
+        self.assertEqual(preview['base_url'], 'https://api.openai.com/v1')
+        self.assertFalse(preview['key_configured'])
+        self.assertFalse(preview['saved_key_configured'])
+        self.assertEqual(preview['generation'], generation)
+        self.assertEqual(Path(Paths.user_file('llm.json')).read_bytes(), before)
+        result = self.service.apply({'provider': 'openai', 'api_key': 'openai-private',
+                                     'gamemaster_model': 'gm/test'})
+        self.assertEqual(result['gamemaster_model'], 'gm/test')
+        result = self.service.apply({'provider': 'openrouter'})
+        self.assertEqual(result['model'], 'router/model')
+        saved = self.stored()
+        self.assertEqual(saved['api_key'], 'router-private')
+        self.assertEqual(saved['provider_profiles']['openai']['api_key'], 'openai-private')
+        self.assertNotIn('router-private', json.dumps(result))
+        self.assertNotIn('openai-private', json.dumps(result))
+
+    def test_endpoint_change_does_not_send_or_persist_previous_key(self):
+        self.seed()
+        prepared = self.service.prepare_test({'base_url': 'https://another.test/v1'})
+        self.assertEqual(prepared.skipped, 'not_configured')
+        result = self.service.apply({'base_url': 'https://another.test/v1'})
+        self.assertFalse(result['key_configured'])
+        self.assertEqual(self.stored()['api_key'], '')
+
+    def test_provider_environment_key_is_selected_and_never_saved(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'openai-environment-private',
+                                     'OPENROUTER_API_KEY': 'router-environment-private'}):
+            preview = self.service.get({'provider': 'openai'})
+            self.assertTrue(preview['key_from_environment'])
+            self.assertIn('api_key', preview['environment_overrides'])
+            result = self.service.apply({'provider': 'openai'})
+            self.assertEqual(self.stored()['api_key'], '')
+            self.assertNotIn('openai-environment-private', json.dumps(result))
+            self.assertNotIn('router-environment-private', json.dumps(result))
+
+    def test_malformed_profile_fields_cannot_echo_another_profile_key(self):
+        self.service.apply({'provider': 'openrouter', 'api_key': 'router-private'})
+        self.service.apply({'provider': 'openai', 'api_key': 'openai-private'})
+        saved = self.stored()
+        saved['provider_profiles']['openai']['model'] = 'router-private'
+        saved['provider_profiles']['openai']['gamemaster_model'] = 'openai-private'
+        Path(Paths.user_file('llm.json')).write_text(json.dumps(saved), encoding='utf-8')
+        rendered = json.dumps(self.service.get({'provider': 'openai'}))
+        self.assertNotIn('router-private', rendered)
+        self.assertNotIn('openai-private', rendered)
+
+    def test_explicit_gamemaster_probe_uses_own_model(self):
+        called = []
+        class Chat:
+            def __init__(self, config): self.config = config
+            def chat(self, *args, **kwargs):
+                called.append(self.config.model)
+                return 'ready'
+        service = SettingsService(chat_factory=Chat)
+        result = service.test({'provider': 'openai', 'model': 'opponent/test',
+                               'chat_model': 'advisor/test', 'gamemaster_model': 'gm/test',
+                               'api_key': 'fake-key'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(called, ['opponent/test', 'advisor/test', 'gm/test'])
+        self.assertEqual(result['reports'][-1]['role'], 'gamemaster')
+
     def test_godot_dialog_secure_key_and_stale_callbacks(self):
         candidates = [os.environ.get("BOP_GODOT"), shutil.which("godot"), shutil.which("godot4")]
         candidates += sorted(glob.glob(os.path.expanduser("~/.local/share/bop-tools/godot-*/Godot*linux.x86_64")), reverse=True)

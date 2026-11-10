@@ -8,7 +8,7 @@ Import this FIRST in a test entry point, before anything from the game::
 Importing it, in place:
 
 * removes every model credential from the environment (``BOP_LLM_*`` and
-  ``OPENROUTER_API_KEY``), so a test can never spend a real key, and so
+  all supported provider API-key variables), so a test can never spend a real key, and so
   ``LLMConfig()`` behaves the same on every machine;
 * removes proxy and CA-bundle variables, and sets ``NO_PROXY`` to the loopback
   addresses, so the stub servers the tests start on 127.0.0.1 are reached
@@ -28,7 +28,9 @@ import shutil
 import tempfile
 
 #: Variables that would carry a credential or redirect traffic.
-_DROP_EXACT = ("OPENROUTER_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+_DROP_EXACT = ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
+               "ANTHROPIC_API_KEY", "DASHSCOPE_API_KEY", "GEMINI_API_KEY",
+               "GOOGLE_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                "http_proxy", "https_proxy", "all_proxy", "REQUESTS_CA_BUNDLE",
                "SSL_CERT_FILE", "CURL_CA_BUNDLE")
 

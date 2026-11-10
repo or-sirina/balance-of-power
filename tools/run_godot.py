@@ -28,7 +28,9 @@ def find_godot(explicit):
 def isolate_smoke():
     for key in list(os.environ):
         if key.startswith("BOP_LLM_") or key in {
-            "OPENROUTER_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "OPENROUTER_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
+            "ANTHROPIC_API_KEY", "DASHSCOPE_API_KEY", "GEMINI_API_KEY",
+            "GOOGLE_API_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "all_proxy", "REQUESTS_CA_BUNDLE",
             "SSL_CERT_FILE", "CURL_CA_BUNDLE",
         }:

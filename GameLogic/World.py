@@ -49,6 +49,7 @@ class World:
         "firedEvents": list,
         "lastEvent": "",
         "intel": lambda: [0, 0],
+        "gameMasterState": dict,
     }
 
     def repair(self):

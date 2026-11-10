@@ -30,6 +30,7 @@ from .reports import ReportError, build_report
 from .multiplayer import MultiplayerController
 from .map_scene import build_map_scene
 from .settings import SettingsError, SettingsService
+from . import game_master
 
 
 _RANDOM_LOCK = threading.RLock()
@@ -54,8 +55,8 @@ def _tuples(value):
 class GameService:
     """One local single-player game. All core mutation is serialized.
 
-    model_client_factory is optional and called only after an explicit advice
-    command. Injecting it allows tests to prove no remote call runs on startup.
+    model_client_factory is optional. Remote calls require an explicit advice
+    command, adaptive opponent, or opt-in experimental game master.
     """
 
     def __init__(self, save_dir=None, model_client_factory=None, opponent_factory=None, settings_service=None):
@@ -144,14 +145,23 @@ class GameService:
                     return copy.deepcopy(response)
                 if request_id in self._inflight:
                     raise CommandError("request_in_progress", "this request is already being processed")
-                if command not in ("state", "report", "save_list", "opponent_log", "advisor_history", "settings_get", "settings_apply", "settings_test") and request.get("expected_revision") != self.revision:
+                if command not in ("state", "report", "save_list", "opponent_log", "advisor_history", "settings_get", "settings_apply", "settings_test", "gamemaster_get") and request.get("expected_revision") != self.revision:
                     raise CommandError("stale_revision", "refresh state before sending this command")
                 if self.tutorial.active and command in ("save", "load", "new_game", "import_game", "export_game", "undo"):
                     raise CommandError("tutorial_active", "return to the campaign before saving, loading or starting another game")
                 if command in ("save", "load", "save_delete", "export_game", "import_game", "undo"):
                     self._guard_local()
-                if self._busy is not None and command not in ("state", "report", "save_list", "opponent_log", "advisor_history", "settings_get", "settings_apply", "settings_test", "new_game", "load", "advisor", "crisis_dialogue"):
+                if self._busy is not None and command not in ("state", "report", "save_list", "opponent_log", "advisor_history", "settings_get", "settings_apply", "settings_test", "new_game", "load", "advisor", "crisis_dialogue", "gamemaster_get"):
                     raise CommandError("turn_in_progress", "the opponent is resolving the current command")
+                if command in ("gamemaster_generate", "gamemaster_set_enabled"):
+                    self._require_world()
+                    if not self._gamemaster_supported():
+                        raise CommandError("gamemaster_unavailable", "The experimental game master is available only in a single-player campaign.")
+                if command == "gamemaster_get":
+                    response = self._response(request_id)
+                    response["gamemaster"] = self._gamemaster_view()
+                    self._remember(request_id, fingerprint, response)
+                    return response
                 if command == "opponent_log":
                     response = self._response(request_id)
                     response["opponent_log"] = self._opponent_log()
@@ -197,7 +207,7 @@ class GameService:
                     self._remember(request_id, fingerprint, response)
                     return response
                 if command in ("settings_get", "settings_apply"):
-                    settings = self.settings.get() if command == "settings_get" else self.settings.apply(args)
+                    settings = self.settings.get(args) if command == "settings_get" else self.settings.apply(args)
                     if command == "settings_apply":
                         self._settings_epoch += 1
                         self._refresh_model_settings()
@@ -284,6 +294,7 @@ class GameService:
                     simulation = prepared["simulation"]
                     with simulation._random_context():
                         changed = simulation._execute(command, args)
+                        changed = simulation._auto_game_master(command, args) or changed
                     with self.lock:
                         if self.revision != prepared["revision"] or self._settings_epoch != prepared["settings_epoch"]:
                             raise CommandError("stale_simulation", "the game changed; the pending opponent result was discarded")
@@ -303,6 +314,8 @@ class GameService:
                         self._bind_opponent()
                         if changed:
                             self.revision += 1
+                        if self._busy == request_id:
+                            self._busy = None
                         response = self._response(request_id, events=self._events)
                         self._remember(request_id, fingerprint, response)
                         return response
@@ -356,6 +369,13 @@ class GameService:
             self._responses.popitem(last=False)
 
     def _needs_simulation(self, command, args):
+        if command == "gamemaster_generate":
+            return True
+        if command == "new_game" and args.get("gamemaster_enabled") is True:
+            return True
+        if (self._gamemaster_supported() and self._gamemaster_state().get("enabled")
+                and command in ("end_turn", "crisis_choice")):
+            return True
         if self.opponent_factory is None:
             return False
         if command == "new_game":
@@ -363,6 +383,94 @@ class GameService:
         if command in ("load", "import_game"):
             return True
         return self.world is not None and self.world.level == 5 and command in ("end_turn", "crisis_choice")
+
+    def _gamemaster_state(self):
+        value = getattr(self.world, "gameMasterState", {})
+        return value if isinstance(value, dict) else {}
+
+    def _gamemaster_supported(self):
+        return (self.world is not None and not self.tutorial.active
+                and not self.multiplayer.active and not self.world.twoPFlag)
+
+    def _gamemaster_view(self):
+        state = self._gamemaster_state()
+        supported = self._gamemaster_supported()
+        enabled = bool(state.get("enabled", False))
+        reason = state.get("reason", "")
+        explanations = {
+            "offline": ("Offline mode is enabled. No event was requested.", "Включён автономный режим. Событие не запрашивалось."),
+            "unconfigured": ("Configure a game-master model in AI settings.", "Настройте модель ведущего в настройках ИИ."),
+            "no_candidates": ("No legal event is available in this position.", "В этой позиции нет допустимых событий."),
+            "request_failed": ("The model could not produce a valid event. No AI event was applied.", "Модель не смогла создать допустимое событие. Событие ИИ не применялось."),
+        }
+        error, error_ru_text = explanations.get(reason, ("", ""))
+        if not supported:
+            error, error_ru_text = ("Available in single-player campaigns only.", "Доступно только в одиночной кампании.")
+        year = self.world.year if self.world is not None else None
+        busy = self._busy is not None
+        return dict(enabled=enabled, supported=supported,
+                    status="disabled" if not enabled else ("pending" if busy else state.get("status", "ready")),
+                    reason=reason, last_error=error, last_error_ru=error_ru_text,
+                    last_attempt_year=state.get("last_attempt_year", -1),
+                    last_year=state.get("last_year", -1), history=copy.deepcopy(state.get("history", [])),
+                    can_generate=bool(supported and enabled and not busy and not self.ended
+                        and not self.presenter.newsWindow.locked and not self.world.crisis.hasBegun
+                        and not self.world.beingQuestioned and state.get("last_attempt_year") != year
+                        and state.get("last_year") != year))
+
+    def _auto_game_master(self, command, args):
+        if not self._gamemaster_supported() or not self._gamemaster_state().get("enabled"):
+            return False
+        if command != "new_game" and not any(e["type"] == "turn_completed" for e in self._events):
+            return False
+        if self.ended or self.presenter.newsWindow.locked or self.world.crisis.hasBegun or self.world.beingQuestioned:
+            return False
+        return self._generate_game_master(args)
+
+    def _generate_game_master(self, args):
+        self._require_turn()
+        if not self._gamemaster_supported():
+            raise CommandError("gamemaster_unavailable", "The game master requires a single-player campaign.")
+        state = self._gamemaster_state()
+        if not state.get("enabled"):
+            raise CommandError("gamemaster_disabled", "Enable the experimental game master first.")
+        if state.get("last_attempt_year") == self.world.year or state.get("last_year") == self.world.year:
+            return False
+        language = args.get("language", state.get("language", "en"))
+        if language not in ("en", "ru"):
+            raise CommandError("invalid_argument", "language must be en or ru")
+        context = game_master.prepare(self.world, language)
+        state = dict(state, language=language, reason="")
+        client, readiness = None, "unconfigured"
+        factory = self.model_client_factory
+        if hasattr(factory, "resolve_gamemaster"):
+            try:
+                client, readiness = factory.resolve_gamemaster()
+            except Exception:
+                readiness = "request_failed"
+        if client is None or not context["candidates"]:
+            reason = (readiness if readiness in ("offline", "request_failed") else "unconfigured") if client is None else "no_candidates"
+            self.world.gameMasterState = dict(state, status="fallback", reason=reason)
+            self.emit("gamemaster_status", status="fallback", reason=reason)
+            return True
+        # The attempt belongs to the clone. Both it and the event commit only
+        # while the originating campaign/settings revision is still current.
+        self.world.gameMasterState = dict(state, last_attempt_year=self.world.year, status="ready")
+        backup = world_to_state(self.world)
+        rng_before = random.getstate()
+        try:
+            proposal = self._run_remote(lambda: game_master.request(client, context))
+            outcome = game_master.apply(self.world, proposal, language)
+        except Exception:
+            # A bad response or failed application never leaves partial effects.
+            apply_state(self.world, backup)
+            random.setstate(rng_before)
+            self.world.gameMasterState.update(status="fallback", reason="request_failed")
+            self.emit("gamemaster_status", status="fallback", reason="request_failed")
+        else:
+            self.world.gameMasterState.update(status="generated", reason="")
+            self.emit("gamemaster_event", event=outcome)
+        return True
 
     def _simulation_copy(self):
         simulation = GameService(save_dir=self._save_dir, model_client_factory=self.model_client_factory,
@@ -481,6 +589,10 @@ class GameService:
             side = _integer(args.get("side", 0), "side", 0, 1)
             level = _integer(args.get("level", 1), "level", 1, 5)
             seed = _integer(args.get("seed", 1982), "seed", -(2**63), 2**63 - 1)
+            gm_enabled = args.get("gamemaster_enabled", False)
+            language = args.get("language", "en")
+            if type(gm_enabled) is not bool or language not in ("en", "ru"):
+                raise CommandError("invalid_argument", "gamemaster_enabled must be boolean and language en or ru")
             random.seed(seed)
             if self.model_client_factory is not None and hasattr(self.model_client_factory, "reset_game"):
                 self.model_client_factory.reset_game()
@@ -489,6 +601,8 @@ class GameService:
             self._opponent_source = None
             self.selected_country = None
             self.world = World(level, False, side).repair()
+            if gm_enabled:
+                self.world.gameMasterState = dict(enabled=True, language=language, status="ready", history=[])
             Objectives.ensure_state(self.world)
             self._setup_opponent()
             MovePlanner.prePlanMove(self.world)
@@ -508,6 +622,19 @@ class GameService:
             self.emit("save_deleted", slot=args.get("slot", "prototype"))
             return False
         self._require_world()
+        if command == "gamemaster_set_enabled":
+            enabled = args.get("enabled")
+            if type(enabled) is not bool:
+                raise CommandError("invalid_argument", "enabled must be boolean")
+            state = self._gamemaster_state()
+            if state.get("enabled", False) == enabled:
+                return False
+            status = "generated" if state.get("last_year") == self.world.year else "ready"
+            self.world.gameMasterState = dict(state, enabled=enabled, status=status if enabled else "disabled", reason="")
+            self.emit("gamemaster_status", status=self.world.gameMasterState["status"])
+            return True
+        if command == "gamemaster_generate":
+            return self._generate_game_master(args)
         if command == "select_country":
             country_id = _integer(args.get("country_id"), "country_id", 0, len(self.world.country) - 1)
             changed = self.selected_country != country_id
@@ -781,6 +908,10 @@ class GameService:
         level = _integer(descriptor.get("level"), "saved level", 1, 5)
         candidate = World(level, False, side)
         GameFile.install_into(candidate, document)
+        try:
+            candidate.gameMasterState = game_master.validate_state(candidate)
+        except game_master.GameMasterError:
+            raise CommandError("unsupported_save", "The saved game-master state is invalid.") from None
         metadata = document.get("meta", {}).get("bridge")
         hotseat = metadata.get("hotseat") if isinstance(metadata, dict) else None
         local_controller = MultiplayerController(SimpleNamespace(world=candidate))
@@ -864,6 +995,7 @@ class GameService:
                            "prestige_at_risk": panel.leftInfoVal[0].text},
                 "multiplayer": self.multiplayer.state(), "undo_available": self.undo_available, "ended": self.ended, "nuclear": bool(w.NWFlag or w.ANWFlag),
                 "tutorial": self.tutorial.view(),
+                "gamemaster": self._gamemaster_view(),
                 "opponent": self._opponent_status()}
 
     def _opponent_status(self):

@@ -25,9 +25,12 @@ class ConfiguredModels:
         set_ai_advisors(enabled)
 
     def _configuration(self):
-        from GameLogic.LLMClient import LLMConfig
+        from GameLogic.LLMClient import LLMConfig, SharedBudget
         if self._config is None:
             self._config = LLMConfig()
+        budget = getattr(self._config, "game_budget", None)
+        if budget is None or not getattr(budget, "alive", True):
+            self._config.game_budget = SharedBudget()
         return self._config
 
     def __call__(self):
@@ -53,6 +56,30 @@ class ConfiguredModels:
             else:
                 self._chat.config = resolved
             return self._chat, "ready"
+
+    def resolve_gamemaster(self):
+        """Resolve the director independently of the advisor enable switch.
+
+        A fresh client keeps its role's request state separate while the copied
+        configuration retains the same game-wide call budget.
+        """
+        import copy
+        from GameLogic.LLMClient import LLMClient, is_decision_model
+        with self._lock:
+            config = self._configuration()
+            resolved = copy.copy(config)
+            resolved.model = config.gamemaster_model
+            resolved.backend = "chat"
+            resolved.fallback_models = [model for model in config.fallback_models
+                                        if not is_decision_model(model)]
+            # LLMClient gives retries a 1.5x timeout envelope, so 30
+            # seconds here keeps the director's total network wait at 45s.
+            resolved.timeout = max(0.25, min(float(config.timeout), 30.0))
+            if resolved.offline:
+                return None, "offline"
+            if not resolved.usable or not resolved.model or is_decision_model(resolved.model):
+                return None, "unconfigured"
+            return LLMClient(resolved), "ready"
 
     def opponent(self):
         """Instantiate the original decision/chat opponent without making calls."""

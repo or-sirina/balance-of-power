@@ -184,6 +184,8 @@ func _render_article() -> void:
  var metadata := str(item.get("category_ru" if L.language == "ru" else "category_en", word("Policy move", "Политическое действие") if _policy(item) else word("World event", "Событие в мире")))
  if item.get("year") != null: metadata += "   /   " + str(int(item.year))
  detail.add_child(host._label(metadata, 14, AMBER, true))
+ if str(item.get("source", "")) in ["ai_generated", "gamemaster", "ai_gamemaster"]:
+  detail.add_child(host._label(L.text("gamemaster_source"), 14, AMBER))
  detail.add_child(host._label(_headline(item), 27, PALE, true))
  if country in range(80):
   var geo := HBoxContainer.new()

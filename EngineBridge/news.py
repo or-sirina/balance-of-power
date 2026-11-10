@@ -6,16 +6,18 @@ import json
 import Local
 
 from constants import WORLD_EVENT
-from .localization import country_name, historical_key, news_ru, step_ru, type_ru
+from .localization import country_name, historical_key, news_ru, step_ru, type_ru, gm_news_text
 
 _CATEGORIES = {
     "historical": ("Historical event", "Историческое событие"),
+    "generated": ("AI-generated event", "Событие ИИ"),
     "domestic": ("Domestic affairs", "Внутренние события"),
     "war": ("Armed conflict", "Вооружённый конфликт"),
     "diplomacy": ("Diplomacy", "Дипломатия"),
     "policy": ("Foreign policy", "Внешняя политика"),
 }
 _CONTEXT = {
+    "generated": ("Fictional event in experimental game master mode.", "Вымышленное событие экспериментального режима ведущего ИИ."),
     "historical": ("Review the countries involved to assess your next move.", "Оцените положение затронутых стран перед следующим решением."),
     "domestic": ("Review the country's government and insurgency before choosing your response.", "Оцените положение правительства и повстанцев перед выбором ответа."),
     "war": ("Review both countries and their foreign support before choosing your response.", "Оцените положение обеих стран и их внешнюю поддержку перед выбором ответа."),
@@ -65,8 +67,9 @@ def present_news(world, questionable):
     result, occurrences = [], {}
     for index, news in enumerate(world.news):
         actor, target, host = news.actor.id, news.target.id, news.host.id
+        generated = getattr(news, "source", None) == "ai_generated"
         if news.action == WORLD_EVENT:
-            category = "historical"
+            category = "generated" if generated else "historical"
         elif actor == target:
             category = "domestic"
         elif actor >= 2 and target >= 2 and news.action == 6:
@@ -76,7 +79,7 @@ def present_news(world, questionable):
         else:
             category = "policy"
         key = historical_key(news)
-        year = None
+        year = getattr(news, "gmYear", None) if generated else None
         if key:
             from GameLogic.HistoricalEvents import EVENTS
             year = next((event.year for event in EVENTS if event.key == key), None)
@@ -91,11 +94,17 @@ def present_news(world, questionable):
         if has_values:
             headline, headline_ru = _policy_headlines(news)
             context, context_ru = _POLICY_CONTEXT[news.action]
+        text = news.text
+        if generated:
+            text = gm_news_text(news)
+            headline = '[AI-generated] ' + getattr(news, 'gmHeadline', '')
+            headline_ru = '[Создано ИИ] ' + getattr(news, 'gmHeadlineRu', '')
         result.append({
             "id": index, "story_key": story_key,
-            "text": news.text, "text_ru": news_ru(news),
+            "text": text, "text_ru": news_ru(news),
+            "source": "ai_generated" if generated else ("historical" if key else "rules"),
             "headline": headline, "headline_ru": headline_ru,
-            "type": news.getTypeName(), "type_ru": type_ru(news),
+            "type": "AI-generated event" if generated and news.action == WORLD_EVENT else news.getTypeName(), "type_ru": type_ru(news),
             "actor": actor, "target": target, "host": host,
             "country_id": host if type(host) is int and 0 <= host < len(world.country) else None,
             "action": news.action, "old": news.old, "new": news.new,
