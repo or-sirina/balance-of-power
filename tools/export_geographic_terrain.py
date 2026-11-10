@@ -49,8 +49,8 @@ def main():
     raw = source.read_bytes()
     if hashlib.sha256(raw).hexdigest() != SOURCE_SHA:
         raise ValueError('Natural Earth archive checksum differs from the verified source')
-    metadata = json.loads((ASSETS / 'map_metadata.json').read_text())
-    polygons = json.loads((ASSETS / 'map.json').read_text())
+    metadata = json.loads((ASSETS / 'map_metadata.json').read_text(encoding='utf-8'))
+    polygons = json.loads((ASSETS / 'map.json').read_text(encoding='utf-8'))
     west, south, east, north = metadata['bounds']
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         with Image.open(io.BytesIO(archive.read('SR_50M.tif'))) as raster:
@@ -73,7 +73,7 @@ def main():
         'outputs': {name: hashlib.sha256((ASSETS / name).read_bytes()).hexdigest()
                     for name in ('geo_relief.png', 'geo_terrain_mask.png')},
     }
-    (ROOT / 'data/geography/terrain_source.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (ROOT / 'data/geography/terrain_source.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     print('Exported geographic shaded relief and land mask:', output_size)
 
 

@@ -37,10 +37,10 @@ def ring(coords):
     return [[round(x,6),round(y,6)] for x,y in list(coords)[:-1]]
 
 def write(path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False,separators=(',',':'))+'\n')
+    path.write_text(json.dumps(data, ensure_ascii=False,separators=(',',':'))+'\n', encoding='utf-8')
 
 def main():
-    manifest = json.loads((SOURCE/'sources.json').read_text())
+    manifest = json.loads((SOURCE/'sources.json').read_text(encoding='utf-8'))
     for row in manifest:
         assert hashlib.sha256((SOURCE/row['file']).read_bytes()).hexdigest() == row['sha256'], row['file']
     units = read('ne_50m_admin_0_map_units')
@@ -52,7 +52,7 @@ def main():
     # Modern Länder retain the inter-German border at world-map scale.
     east = unary_union([shape(f['geometry']) for f in admin1 if f['properties']['iso_3166_2'] in ['DE-SN','DE-BB','DE-MV','DE-TH','DE-ST','DE-BE']])
     east = make_valid(east).intersection(by_code['DEU'])
-    overrides = {f['properties']['key']:f for f in json.loads((SOURCE/'historical_overrides.json').read_text())['features']}
+    overrides = {f['properties']['key']:f for f in json.loads((SOURCE/'historical_overrides.json').read_text(encoding='utf-8'))['features']}
     berlin = unary_union([shape(f['geometry']) for f in admin1 if f['properties']['iso_3166_2']=='DE-BE'])
     west_berlin = make_valid(shape(overrides['west_berlin']['geometry'])).intersection(berlin).intersection(by_code['DEU'])
     east = east.difference(west_berlin)
@@ -102,7 +102,7 @@ def main():
         'CIV':('Abidjan',-4.0083,5.3599),'TZA':('Dar es Salaam',39.2083,-6.7924),
         'ZAF':('Pretoria',28.2293,-25.7479),'NGA':('Lagos',3.3792,6.5244),'BOL':('La Paz',-68.1193,-16.4897)}
     anchors, capital_info = {},{}
-    capital_names_ru = json.loads((SOURCE/'capital_names_ru.json').read_text())
+    capital_names_ru = json.loads((SOURCE/'capital_names_ru.json').read_text(encoding='utf-8'))
     for cid,code in enumerate(CODES):
         if code in capital_overrides: name,lon,lat = capital_overrides[code]
         else:

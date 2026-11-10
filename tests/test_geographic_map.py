@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class GeographicMapTests(unittest.TestCase):
     def test_geographic_map_contract(self):
-        data = json.loads((ROOT/'godot/assets/map.json').read_text())
-        metadata = json.loads((ROOT/'godot/assets/map_metadata.json').read_text())
+        data = json.loads((ROOT/'godot/assets/map.json').read_text(encoding='utf-8'))
+        metadata = json.loads((ROOT/'godot/assets/map_metadata.json').read_text(encoding='utf-8'))
         self.assertTrue(metadata['bounds'] == [-180,-60,180,85])
         self.assertTrue({p['id'] for p in data if p['id'] >= 0} == set(range(80)))
         self.assertTrue(len(metadata['anchors']) == 80)
@@ -67,7 +67,7 @@ class GeographicMapTests(unittest.TestCase):
         from shapely.geometry import shape, box
         from shapely.affinity import affine_transform
         from shapely.strtree import STRtree
-        polygons = json.loads((ROOT/'godot/assets/map.json').read_text())
+        polygons = json.loads((ROOT/'godot/assets/map.json').read_text(encoding='utf-8'))
         geometries = [Polygon(p['points'],p['holes']) for p in polygons]
         index = STRtree(geometries)
         for i,geometry in enumerate(geometries):
@@ -83,7 +83,7 @@ class GeographicMapTests(unittest.TestCase):
 
 
     def test_historical_yemen_split(self):
-        data = json.loads((ROOT/'godot/assets/map.json').read_text())
+        data = json.loads((ROOT/'godot/assets/map.json').read_text(encoding='utf-8'))
         def point(lon,lat):
             return Point((lon+180)*1200/360,(85-lat)*600/145)
         sanaa,mukalla = point(44.2,15.35),point(49.10,14.56)

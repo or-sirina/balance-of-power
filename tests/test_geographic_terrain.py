@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class GeographicTerrainTests(unittest.TestCase):
     def test_georeferenced_land_water_and_provenance(self):
-        manifest = json.loads((ROOT / 'data/geography/terrain_source.json').read_text())
+        manifest = json.loads((ROOT / 'data/geography/terrain_source.json').read_text(encoding='utf-8'))
         for name, digest in manifest['outputs'].items():
             path = ROOT / 'godot/assets' / name
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)

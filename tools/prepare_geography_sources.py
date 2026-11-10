@@ -8,7 +8,7 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parents[1] / 'data/geography'
 
 def main():
-    for source in json.loads((SOURCE/'sources.json').read_text()):
+    for source in json.loads((SOURCE/'sources.json').read_text(encoding='utf-8')):
         raw = urllib.request.urlopen(source['url']).read()
         assert hashlib.sha256(raw).hexdigest() == source['upstream_sha256']
         features = json.loads(raw)['features']
