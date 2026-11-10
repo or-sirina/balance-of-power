@@ -1,4 +1,4 @@
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (QAbstractItemView, QBoxLayout, QButtonGroup,
                              QComboBox, QDialog, QGridLayout, QGroupBox,
@@ -20,6 +20,13 @@ class NewsWindow(QDialog):
     def __init__(self, parent):
         super(NewsWindow, self).__init__(parent)
         self.parent = parent
+        self._dialogue_serial = 0
+        self._dialogue_event = None
+        self._dialogue_pending = None
+        self._dialogue_cached = None
+        self._dialogue_stock = None
+        self._dialogue_busy = False
+        self._dialogue_scheduled = False
         # top table - news list and filters
         self.table = QTableWidget(0,5)
         horizLabels = ["", "", "", "", ""]
@@ -82,8 +89,14 @@ class NewsWindow(QDialog):
         self.reactionLine.setMinimumHeight(44)
         self.reactionLine.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.reactionLine.setWordWrap(True)
+        self.reactionLine.setTextFormat(Qt.PlainText)
         leftLayout.addSpacing(20)
         leftLayout.addWidget(self.reactionLine)
+        self.dialogueStatus = QLabel()
+        self.dialogueStatus.setWordWrap(True)
+        self.dialogueStatus.setTextFormat(Qt.PlainText)
+        self.dialogueStatus.setStyleSheet("color: %s;" % Palette.TEXT_DIM.name())
+        leftLayout.addWidget(self.dialogueStatus)
         leftLayout.addSpacing(20)
         leftInfoLayout = [QBoxLayout(QBoxLayout.LeftToRight) for i in range(3)]
         self.leftInfo = [QLabel() for i in range(3)]
@@ -120,7 +133,9 @@ class NewsWindow(QDialog):
             column.addWidget(self.bias[i])
             column.addStretch(1)
             self.advice[i].setWordWrap(True)
-            self.advice[i].setFixedWidth(96)
+            self.advice[i].setTextFormat(Qt.PlainText)
+            self.advice[i].setMinimumWidth(96)
+            self.advice[i].setMaximumWidth(220)
             head[i].addLayout(column)
             head[i].addWidget(self.advice[i])
             headsColumn[i//2].addLayout(head[i])
@@ -263,6 +278,8 @@ class NewsWindow(QDialog):
             for i in range(4):
                 self.advice[i].setText(getAdvisorOpinion(self.parent.world, headline, i + 1))
                 self.picture[i].setVisible(True)
+            self._dialogue_stock = (self.parent.world, headline,
+                                    tuple(label.text() for label in self.advice))
         else: self.hideAdvisors()
 
     def idleSummary(self):
@@ -324,6 +341,7 @@ class NewsWindow(QDialog):
 
 
     def hideAdvisors(self):
+        self._invalidateDialogue()
         self.backDown.setEnabled(False)
         self.question.setEnabled(False)
         for i in range(4):
@@ -338,6 +356,7 @@ class NewsWindow(QDialog):
 
     def setLocked(self, value):
         if not value:
+            self._invalidateDialogue()
             previousRow = self.table.currentRow()
             self.backDown.setText(Local.strings[Local.CRISIS_BD_BUTTON][0])
             self.reactionLine.setText("")
@@ -351,6 +370,153 @@ class NewsWindow(QDialog):
         for i in self.filters: i.setDisabled(value)
         self.ctryList.setDisabled(value)
         self.localNews.setDisabled(value)
+
+    def _invalidateDialogue(self):
+        self._dialogue_serial += 1
+        self._dialogue_event = self._dialogue_pending = self._dialogue_cached = None
+        self.dialogueStatus.clear()
+
+    def hideEvent(self, event):
+        self._invalidateDialogue()
+        super(NewsWindow, self).hideEvent(event)
+
+    def _dialogueContext(self, world, headline):
+        from GameLogic.AdvisorChat import ai_advisors_enabled
+        config = getattr(self.parent, "llm_config", None)
+        settings = (ai_advisors_enabled(config), id(config),
+                    getattr(config, "usable", False), getattr(config, "offline", False),
+                    getattr(config, "model", None), getattr(config, "chat_model", None),
+                    getattr(config, "base_url", None), hash(getattr(config, "api_key", "")))
+        crisis = world.crisis
+        return (world, crisis, headline, world.year, world.human, crisis.level,
+                crisis.hasBegun, crisis.backDown, headline.old, headline.new,
+                bool(world.NWFlag or world.ANWFlag), settings, self._dialogueLanguage())
+
+    def _dialogueLanguage(self):
+        language = getattr(self.parent, "language", None)
+        if language in ("en", "ru"):
+            return language
+        actions = getattr(getattr(self.parent, "menu", None), "languages", {})
+        for name, action in actions.items():
+            if action.isChecked():
+                return "ru" if str(name).lower().startswith("russian") else "en"
+        return "en"
+
+    def _dialogueStatus(self, state):
+        english = {
+            "unavailable": "Diplomacy: built-in text (model unavailable).",
+            "disabled": "Diplomacy: built-in text (AI advisors disabled).",
+            "unconfigured": "Diplomacy: built-in text (no model configured).",
+            "offline": "Diplomacy: built-in text (offline mode).",
+            "loading": "LLM diplomacy: loading\u2026",
+        }
+        russian = {
+            "unavailable": "Дипломатия: стандартные реплики (модель недоступна).",
+            "disabled": "Дипломатия: стандартные реплики (ИИ-советники отключены).",
+            "unconfigured": "Дипломатия: стандартные реплики (модель не настроена).",
+            "offline": "Дипломатия: стандартные реплики (автономный режим).",
+            "loading": "Дипломатия LLM: ожидаем ответ\u2026",
+        }
+        return (russian if self._dialogueLanguage() == "ru" else english)[state]
+
+    def queueCrisisDialogue(self, world, headline, speaker, outcome, headline_text=None):
+        """Coalesce mechanical display hooks; no request runs inside a game step."""
+        if world is not self.parent.world or world.twoPFlag or headline is None:
+            return
+        context = self._dialogueContext(world, headline)
+        event = (context, int(speaker), outcome, headline_text)
+        if event == self._dialogue_event:
+            if self._dialogue_cached is not None:
+                self._applyDialogue(*self._dialogue_cached)
+            return
+        stock = self._dialogue_stock
+        if stock is None or stock[:2] != (world, headline) or (
+                outcome == "challenge" and headline.actor.id == world.human and world.crisis.level == 9):
+            self._dialogue_stock = (world, headline, tuple(label.text() for label in self.advice))
+        else:
+            for label, line in zip(self.advice, stock[2]):
+                label.setText(line)
+        self._dialogue_serial += 1
+        self._dialogue_event = self._dialogue_pending = event
+        self._dialogue_cached = None
+        if not self._dialogue_busy:
+            self._scheduleDialogue()
+
+    def _scheduleDialogue(self):
+        if not self._dialogue_scheduled:
+            self._dialogue_scheduled = True
+            QTimer.singleShot(0, self._refreshCrisisDialogue)
+
+    def _dialogueCurrent(self, event, serial):
+        world, _crisis, headline = event[0][:3]
+        return (serial == self._dialogue_serial and self.isVisible()
+                and world is self.parent.world and world.crisis.whichHead is headline
+                and self._dialogueContext(world, headline) == event[0])
+
+    def _applyDialogue(self, reply, status):
+        if reply is not None:
+            self.reactionLine.setText(reply.reaction)
+            self.setAdvisorSide(self.parent.world.human)
+            for label, picture, line in zip(self.advice, self.picture, reply.advisors):
+                label.setText(line)
+                picture.setVisible(True)
+        self.dialogueStatus.setText(status)
+
+    def _refreshCrisisDialogue(self):
+        self._dialogue_scheduled = False
+        if self._dialogue_busy or self._dialogue_pending is None:
+            return
+        event = self._dialogue_pending
+        self._dialogue_pending = None
+        serial = self._dialogue_serial
+        if not self._dialogueCurrent(event, serial) or event[0][10]:
+            return
+        from GameLogic.AdvisorChat import ai_advisors_enabled, chat_config
+        from GameLogic.CrisisDialogue import generate, snapshot
+
+        config = getattr(self.parent, "llm_config", None)
+        reply = None
+        status = self._dialogueStatus("unavailable")
+        self._dialogue_busy = True
+        try:
+            if not ai_advisors_enabled(config):
+                status = self._dialogueStatus("disabled")
+            elif config is None:
+                status = self._dialogueStatus("unconfigured")
+            elif getattr(config, "offline", False):
+                status = self._dialogueStatus("offline")
+            elif not getattr(chat_config(config), "usable", False):
+                status = self._dialogueStatus("unconfigured")
+            else:
+                client_factory = getattr(self.parent, "advisor_client", None)
+                client = client_factory() if client_factory else None
+                if client is not None:
+                    world, _crisis, headline = event[0][:3]
+                    # Freeze facts before llm_execute starts its worker or pumps
+                    # Qt events. Neither a world nor a widget enters that worker.
+                    request = snapshot(world, headline, event[1], event[2], event[3],
+                                       language=event[0][-1])
+                    self.dialogueStatus.setText(self._dialogueStatus("loading"))
+                    reply = generate(request, client, getattr(self.parent, "llm_execute", None))
+                    status = reply.status
+        except Exception:
+            # Provider bodies can contain secrets or markup. The UI only needs
+            # to distinguish a model reply from the text that was already here.
+            status = self._dialogueStatus("unavailable")
+        finally:
+            self._dialogue_busy = False
+            if self._dialogueCurrent(event, serial):
+                self._dialogue_cached = (reply, status)
+                self._applyDialogue(reply, status)
+            elif self._dialogue_pending is None and serial == self._dialogue_serial:
+                world, _crisis, headline = event[0][:3]
+                if self.isVisible() and world is self.parent.world and world.crisis.whichHead is headline:
+                    state = "unavailable" if ai_advisors_enabled(config) else "disabled"
+                    self.dialogueStatus.setText(self._dialogueStatus(state))
+                else:
+                    self.dialogueStatus.clear()
+            if self._dialogue_pending is not None:
+                self._scheduleDialogue()
 
     def _getCurrentMode(self):
         if self.parent.world.beingQuestioned: return 6

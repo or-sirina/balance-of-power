@@ -140,3 +140,9 @@ cython_debug/
 # Ignore options and saves
 options.dat
 save.dat
+
+# Godot's imported resources are regenerated from source assets.
+godot/.godot/
+godot/export.cfg
+dist-godot/
+dist-godot-*/
